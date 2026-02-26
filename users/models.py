@@ -4,6 +4,7 @@ from django.conf import settings
 from PIL import Image
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+import uuid
 
 class CustomUserManager(UserManager):
 
@@ -33,6 +34,10 @@ class CustomUserManager(UserManager):
 
 class User(AbstractUser):
     objects = CustomUserManager()
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    
+    def __str__(self):
+        return self.username
 
 class UserProfile(models.Model):
     

@@ -79,7 +79,7 @@ class Post(models.Model):
         help_text="Attach a workout to this post.",
     )
 
-    # --- Denormalised counters (updated via signal / service layer) ---
+    
     likes_count    = models.PositiveIntegerField(default=0)
     dislikes_count = models.PositiveIntegerField(default=0)
     comments_count = models.PositiveIntegerField(default=0)
