@@ -1,0 +1,29 @@
+# Core Framework
+Django>=5.0,<5.3
+djangorestframework>=3.15.0
+
+# Authentication
+djangorestframework-simplejwt>=5.3.0
+
+# Database & Environment
+psycopg2-binary>=2.9.0
+python-dotenv>=1.0.0
+
+# Security & CORS
+django-cors-headers>=4.3.0
+
+# Filtering
+django-filter>=23.0
+
+# Image handling (required for ImageField on User.profile_picture)
+Pillow>=10.0.0
+
+# API Documentation (Swagger/OpenAPI)
+drf-spectacular>=0.27.0
+
+# Production Server
+gunicorn>=21.0.0
+uvicorn>=0.27.0
+
+# Utility
+whitenoise>=6.6.0
