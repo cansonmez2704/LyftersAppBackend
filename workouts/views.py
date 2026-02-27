@@ -1,8 +1,8 @@
 from django.db.models import Q
 from rest_framework.viewsets import ModelViewSet
 from rest_framework import permissions
-from .models import Exercise , WorkoutExercise , Workout
-from .serializers import ExerciseSerializer , WorkoutExerciseSerializer , WorkoutSerializer
+from .models import Exercise , Workout
+from .serializers import ExerciseSerializer , WorkoutSerializer
 from common.permissions import IsOwner
 
 class ExerciseViewSet(ModelViewSet):
