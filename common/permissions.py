@@ -5,5 +5,14 @@ class IsOwner(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         if request.method in permissions.SAFE_METHODS:
             return True
-        return obj.owner == request.user
+        elif hasattr(obj,"owner"):
+            return obj.owner == request.user
+        elif hasattr(obj,"author"):
+            return obj.author == request.user
+        elif hasattr(obj,"user"):
+            return obj.user == request.user
+        else:
+            return False
+        
+         
         

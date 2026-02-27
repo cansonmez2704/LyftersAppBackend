@@ -24,7 +24,7 @@ class CommentSerializer(serializers.ModelSerializer):
     author = MiniUserProfileSerializer(read_only=True)
     class Meta:
         model = Comment
-        fields = ("id","author","parent","body","likes_count","dislikes_count","reactions","is_deleted","created_at","updated_at",)
+        fields = ("id","author","parent","post","body","likes_count","dislikes_count","reactions","is_deleted","created_at","updated_at",)
 
 class PostSerializer(serializers.ModelSerializer):
     author = MiniUserProfileSerializer(read_only=True)
