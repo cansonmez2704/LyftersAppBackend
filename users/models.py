@@ -54,6 +54,7 @@ class UserProfile(models.Model):
     
     user = models.OneToOneField(settings.AUTH_USER_MODEL,on_delete=models.CASCADE,related_name="profile")
     avatar = models.ImageField(upload_to=avatar_upload_image_path, null = True, blank =True)
+    is_public = models.BooleanField(default=True)
     bio = models.TextField(null = True , blank = True)
     height = models.IntegerField(null = True , blank = True)
     weight = models.IntegerField(null = True , blank = True)
