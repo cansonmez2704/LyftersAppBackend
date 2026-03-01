@@ -88,7 +88,7 @@ class Post(models.Model):
     
     is_pinned   = models.BooleanField(default=False)
     is_archived = models.BooleanField(default=False, db_index=True)
-    is_deleted = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False, db_index=True)
 
     
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -166,7 +166,7 @@ class Comment(models.Model):
     likes_count    = models.PositiveIntegerField(default=0)
     dislikes_count = models.PositiveIntegerField(default=0)
 
-    is_deleted = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False, db_index=True)
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)

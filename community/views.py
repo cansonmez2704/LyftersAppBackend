@@ -104,12 +104,17 @@ class CommentViewSet(ModelViewSet):
             return [permissions.IsAuthenticated(), IsOwner()]
         return [permissions.IsAuthenticated()]
     
-    def perform_create(self, serializer):
-        serializer.save(author=self.request.user)
+    def perform_create(self,serializer):
+       comment = serializer.save(author=self.request.user)
+       post_id = comment.post.id
+       Post.objects.filter(id=post_id).update(comments_count = F("comments_count")+1)
         
     def perform_destroy(self, instance):
         instance.is_deleted = True
         instance.save(update_fields=['is_deleted'])
+        post_id = instance.post.id
+        Post.objects.filter(id=post_id).update(comments_count = F("comments_count")-1)
+        
     
     @action(detail= True , methods=["POST"])
     def react_to_comment(self,request,pk=None):
