@@ -19,10 +19,4 @@ class WorkoutExerciseSerializer(serializers.ModelSerializer):
         model = WorkoutExercise
         fields = ("id","exercise","order","sets","reps","weight_kg","duration_sec","rest_sec","notes")
 
-class WorkoutSerializer(serializers.ModelSerializer):
-    workout_exercises = WorkoutExerciseSerializer(many=True,read_only=True)
-    owner = MiniUserProfileSerializer(source="owner.profile", read_only=True)
-    
-    class Meta:
-        model = Workout
-        fields = ("id","owner","name","description","cover_image","workout_exercises","visibility","estimated_duration_min","is_template","created_at","updated_at")
+
