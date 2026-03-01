@@ -1,13 +1,14 @@
 from django.contrib import admin
+from .models import Exercise, MuscleGroup, Workout, WorkoutExercise 
 
-from .models import Exercise, MuscleGroup, Workout, WorkoutExercise
 
 
 class WorkoutExerciseInline(admin.TabularInline):
     model = WorkoutExercise
     extra = 1
-    fields = ("order", "exercise", "sets", "reps", "weight_kg", "duration_sec", "rest_sec", "notes")
+    fields = ("order", "exercise","notes")
     ordering = ("order",)
+  
 
 
 @admin.register(MuscleGroup)
