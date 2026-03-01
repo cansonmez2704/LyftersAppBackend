@@ -90,18 +90,13 @@ class Exercise(models.Model):
         return f"{self.name} ({self.get_exercise_type_display()})"
 
 
+
 class WorkoutExercise(models.Model):
     
     workout  = models.ForeignKey("Workout",  on_delete=models.CASCADE, related_name="workout_exercises")
     exercise = models.ForeignKey(Exercise,   on_delete=models.CASCADE, related_name="workout_exercises")
-
-    order        = models.PositiveSmallIntegerField(default=1, help_text="Order of this exercise in the workout.")
-    sets         = models.PositiveSmallIntegerField(null=True, blank=True)
-    reps         = models.PositiveSmallIntegerField(null=True, blank=True, help_text="Reps per set (for strength / calisthenics).")
-    weight_kg    = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, help_text="Load in kilograms.")
-    duration_sec = models.PositiveIntegerField(null=True, blank=True, help_text="Duration in seconds (for cardio / isometric holds).")
-    rest_sec     = models.PositiveSmallIntegerField(null=True, blank=True, help_text="Rest between sets in seconds.")
-    notes        = models.TextField(blank=True)
+    order = models.PositiveSmallIntegerField(default=1, help_text="Order of this exercise in the workout.")
+    notes = models.TextField(blank=True)
 
     class Meta:
         ordering = ["order"]
@@ -117,6 +112,34 @@ class WorkoutExercise(models.Model):
     def __str__(self) -> str:
         return f"{self.workout} → {self.exercise} (#{self.order})"
 
+class WorkoutSet(models.Model):
+    class WeightUnitChoices(models.TextChoices):
+     KILOGRAM = "KG", "Kilogram"
+     POUND = "LBS", "Pound"
+     GRAM = "G", "Gram"        
+     OUNCE = "OZ", "Ounce"     
+     STONE = "ST", "Stone"
+
+    workout_exercise = models.ForeignKey(WorkoutExercise,  on_delete=models.CASCADE,related_name="sets")
+    set_number = models.PositiveSmallIntegerField(null=True, blank=True)
+    reps = models.PositiveSmallIntegerField(null=True, blank=True, help_text="Reps per set (for strength / calisthenics).")
+    weight_unit = models.CharField(null=True,blank=True,choices=WeightUnitChoices)
+    weight = models.DecimalField(max_digits=5, decimal_places=2,null=True, blank=True)
+    duration_seconds = models.PositiveSmallIntegerField(null=True, blank=True, help_text="Duration in seconds (for cardio / isometric).")
+    
+    class Meta:
+        ordering = ["set_number"]
+        verbose_name = "Workout Set"
+        verbose_name_plural = "Workout Sets"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workout_exercise", "set_number"],
+                name="unique_set_number_per_workout_exercise",
+            )
+        ]
+    
+    def __str__(self) -> str:
+        return f"{self.workout_exercise} - Set {self.set_number}"
 
 class Workout(models.Model):
 
