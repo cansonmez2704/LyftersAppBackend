@@ -54,7 +54,7 @@ class PostListSerializer(serializers.ModelSerializer):
         )
 
 class PostDetailSerializer(PostListSerializer):
-    comments = CommentSerializer(read_only=True, many=True)
+    comments = serializers.SerializerMethodField()
     reactions = PostReactionSerializer(read_only=True, many=True)
     class Meta(PostListSerializer.Meta):
         fields = PostListSerializer.Meta.fields + (
@@ -63,4 +63,8 @@ class PostDetailSerializer(PostListSerializer):
         read_only_fields = PostListSerializer.Meta.read_only_fields + (
             "comments", "reactions",
         )
+    
+    def get_comments(self,obj):
+        active_comments = obj.comments.filter(is_deleted=False)
+        return CommentSerializer(active_comments, many=True).data
 
