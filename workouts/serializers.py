@@ -47,12 +47,14 @@ class WorkoutWriteSerializer(serializers.ModelSerializer):
         model = Workout
         fields = ("id","name","description","cover_image","workout_exercises","visibility","estimated_duration_min","is_template")
     
-    def create(self,validated_data):
-        workout_exercises_data = validated_data.pop("workout_exercises")
-        workout = Workout.objects.create(**validated_data)
-        for exercise_data in workout_exercises_data:
-            sets_data = exercise_data.pop("sets")
-            workout_exercise = WorkoutExercise.objects.create(workout=workout,**exercise_data)
-            for set_data in sets_data:
-                WorkoutSet.objects.create(workout_exercise=workout_exercise,**set_data)
-        return workout
+    def create(self, validated_data):
+     workout_exercises_data = validated_data.pop("workout_exercises")
+     workout = Workout.objects.create(**validated_data)
+     all_sets = []
+     for exercise_data in workout_exercises_data:
+        sets_data = exercise_data.pop("sets")
+        workout_exercise = WorkoutExercise.objects.create(workout=workout, **exercise_data)
+        for set_data in sets_data:
+            all_sets.append(WorkoutSet(workout_exercise=workout_exercise, **set_data))
+     WorkoutSet.objects.bulk_create(all_sets)
+     return workout

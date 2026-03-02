@@ -20,18 +20,47 @@ class CommentReactionSerializer(serializers.ModelSerializer):
         fields = ("user","reaction_type","created_at",)
 
 class CommentSerializer(serializers.ModelSerializer):
-    reactions = CommentReactionSerializer(many=True,read_only=True)
-    author = MiniUserProfileSerializer(source="author.profile",read_only=True)
+    reactions = CommentReactionSerializer(many=True, read_only=True)
+    author = MiniUserProfileSerializer(source="author.profile", read_only=True)
+
     class Meta:
         model = Comment
-        fields = ("id","author","parent","post","body","likes_count","dislikes_count","reactions","is_deleted","created_at","updated_at",)
+        fields = (
+            "id", "author", "parent", "post", "body",
+            "likes_count", "dislikes_count", "reactions",
+            "is_deleted", "created_at", "updated_at",
+        )
+        read_only_fields = (
+            "id", "author", "likes_count", "dislikes_count",
+            "is_deleted", "created_at", "updated_at",
+        )
 
-class PostSerializer(serializers.ModelSerializer):
-    author = MiniUserProfileSerializer(source="author.profile",read_only=True)
-    comments = CommentSerializer(read_only=True,many=True)
-    media = PostMediaSerializer(read_only=True,many=True)
+
+
+class PostListSerializer(serializers.ModelSerializer):
+    author = MiniUserProfileSerializer(source="author.profile", read_only=True)
+    media = PostMediaSerializer(read_only=True, many=True)
     class Meta:
         model = Post
-        fields = ("id","uuid","author","title","description","cover_image","post_type","visibility","comments","media","likes_count","dislikes_count","comments_count","linked_workout")
+        fields = (
+            "id", "uuid", "author", "title", "description",
+            "cover_image", "post_type", "visibility", "media", "likes_count",
+            "dislikes_count", "comments_count", "created_at", "updated_at",
+        )
+        read_only_fields = (
+            "id", "uuid", "author", "likes_count",
+            "dislikes_count", "comments_count",
+            "created_at", "updated_at",
+        )
 
+class PostDetailSerializer(PostListSerializer):
+    comments = CommentSerializer(read_only=True, many=True)
+    reactions = PostReactionSerializer(read_only=True, many=True)
+    class Meta(PostListSerializer.Meta):
+        fields = PostListSerializer.Meta.fields + (
+            "comments", "reactions",
+        )
+        read_only_fields = PostListSerializer.Meta.read_only_fields + (
+            "comments", "reactions",
+        )
 
