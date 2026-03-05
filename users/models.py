@@ -1,87 +1,115 @@
-from django.contrib.auth.models import UserManager , AbstractUser
-from django.db import models
+
+
+import uuid
 from django.conf import settings
-from PIL import Image
+from django.contrib.auth.models import AbstractUser, UserManager
+from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db import models, transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-import uuid
+
 
 class CustomUserManager(UserManager):
-
+    
     def create_user(self, username, email=None, password=None, **extra_fields):
         if not email:
-            raise ValueError("The Email must be set")
-        
+            raise ValueError("Email is required for user registration.")
         email = self.normalize_email(email)
         user = self.model(username=username, email=email, **extra_fields)
         user.set_password(password)
-
         user.save(using=self._db)
         return user
-
     def create_superuser(self, username, email=None, password=None, **extra_fields):
-        extra_fields.setdefault('is_staff', True)
-        extra_fields.setdefault('is_superuser', True)
-        extra_fields.setdefault('is_active', True)
-
-        if extra_fields.get('is_staff') is not True:
-            raise ValueError('Superuser must have is_staff=True.')
-        if extra_fields.get('is_superuser') is not True:
-            raise ValueError('Superuser must have is_superuser=True.')
-
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+        extra_fields.setdefault("is_active", True)
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError("Superuser must have is_staff=True.")
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError("Superuser must have is_superuser=True.")
         return self.create_user(username, email, password, **extra_fields)
-    
 
 class User(AbstractUser):
-    objects = CustomUserManager()
-    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     
-    def __str__(self):
+    objects = CustomUserManager()
+    uuid = models.UUIDField(
+        default=uuid.uuid4,
+        editable=False,
+        unique=True,
+        help_text="Public-facing identifier. Never expose the integer PK.",
+    )
+    class Meta(AbstractUser.Meta):
+        pass
+    def __str__(self) -> str:
         return self.username
 
+def avatar_upload_path(instance, filename: str) -> str:
+   
+        ext = filename.rsplit(".", 1)[-1].lower()
+        return f"avatars/user_{instance.user_id}/avatar.{ext}"
+
 class UserProfile(models.Model):
-    
-    def avatar_upload_image_path(instance,filename):
-        ext = filename.split(".")[-1]
-        filename = f"avatar.{ext}"
-        return f"avatars/user_{instance.user.id}/{filename}"
-
+   
     class GenderChoices(models.TextChoices):
-       MALE = "M" , "Male"
-       FEMALE = "F" , "Female"
-       OTHER =  "O" , "Other"
-       
-    
-    user = models.OneToOneField(settings.AUTH_USER_MODEL,on_delete=models.CASCADE,related_name="profile")
-    avatar = models.ImageField(upload_to=avatar_upload_image_path, null = True, blank =True)
+        MALE = "M", "Male"
+        FEMALE = "F", "Female"
+        OTHER = "O", "Other"
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="profile",
+    )
+    avatar = models.ImageField(
+        upload_to=avatar_upload_path,
+        null=True,
+        blank=True,
+    )
     is_public = models.BooleanField(default=True)
-    bio = models.TextField(null = True , blank = True)
-    height = models.IntegerField(null = True , blank = True)
-    weight = models.IntegerField(null = True , blank = True)
-    gender = models.CharField(max_length=10, choices=GenderChoices.choices, null = True , blank = True)
-    birth_date = models.DateField(null = True , blank = True)
-    
-
-    def save(self,*args,**kwargs):
-        super().save(*args,**kwargs)
-
-        if self.avatar:
-          img = Image.open(self.avatar.path)
-         
-          if img.height > 300 or img.width > 300:
-            output_size = (300, 300)
-            img.thumbnail(output_size) 
-            img.save(self.avatar.path)
-
+    bio = models.CharField(max_length=2000, blank=True, default="")
+    height = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(50), MaxValueValidator(300)],
+        help_text="Height in centimetres.",
+    )
+    weight = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(20), MaxValueValidator(500)],
+        help_text="Weight in kilograms.",
+    )
+    gender = models.CharField(
+        max_length=1,
+        choices=GenderChoices.choices,
+        blank=True,
+        default="",
+    )
+    birth_date = models.DateField(null=True, blank=True)
+    # --- Timestamps (match the rest of the project) ---
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+   
+    class Meta:
+        verbose_name = "User Profile"
+        verbose_name_plural = "User Profiles"
+   
+    def __str__(self) -> str:
+        return f"Profile of {self.user}"
+   
     @property
-    def avatar_url(self):
-     if self.avatar and hasattr(self.avatar, 'url'):
-        return self.avatar.url
-     return "/static/images/default-avatar.png"
+    def avatar_url(self) -> str:
+       
+        if self.avatar and hasattr(self.avatar, "url"):
+            return self.avatar.url
+        return "/static/images/default-avatar.png"
+   
+    # NOTE: Avatar resizing should be handled asynchronously.
+    # In production, enqueue a Celery task in the serializer's save
+    # to resize after upload, rather than blocking the request here.
 
-@receiver(post_save,sender=settings.AUTH_USER_MODEL)
+@receiver(post_save, sender=settings.AUTH_USER_MODEL)
 def create_user_profile(sender, instance, created, **kwargs):
-   if created:
-      UserProfile.objects.create(user=instance)
-
-
+    if created:
+        transaction.on_commit(
+            lambda: UserProfile.objects.get_or_create(user=instance)
+        )

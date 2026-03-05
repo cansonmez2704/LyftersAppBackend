@@ -65,6 +65,5 @@ class PostDetailSerializer(PostListSerializer):
         )
     
     def get_comments(self,obj):
-        active_comments = obj.comments.filter(is_deleted=False)
-        return CommentSerializer(active_comments, many=True).data
+        return CommentSerializer(obj.comments.all(), many=True).data
 

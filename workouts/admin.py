@@ -34,7 +34,7 @@ class ExerciseAdmin(admin.ModelAdmin):
 
 @admin.register(Workout)
 class WorkoutAdmin(admin.ModelAdmin):
-    list_display   = ("name", "owner", "visibility", "is_template", "exercise_count", "created_at")
+    list_display   = ("name", "owner", "visibility", "is_template", "created_at")
     list_filter    = ("visibility", "is_template")
     search_fields  = ("name", "description", "owner__username")
     readonly_fields = ("created_at", "updated_at")

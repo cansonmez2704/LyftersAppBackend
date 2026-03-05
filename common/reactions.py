@@ -1,4 +1,5 @@
-from django.db.models import F, Greatest, Value
+from django.db.models import F, Value
+from django.db.models.functions import Greatest
 
 
 def toggle_reaction(*, reaction_model, parent_obj, parent_field_name,

@@ -1,4 +1,4 @@
-from django.db.models import Q , F , Value
+from django.db.models import Q , F , Value 
 from django.db.models.functions import Greatest
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.decorators import action
@@ -29,9 +29,15 @@ class PostViewSet(ModelViewSet):
 
      if self.action == 'retrieve':
         return base_queryset.prefetch_related(
-            "media", "comments__author__profile", "reactions__user__profile"
-        )
-
+        Prefetch(
+            "comments",
+            queryset=Comment.objects.filter(is_deleted=False)
+                          .select_related("author__profile")
+                          .prefetch_related("reactions__user__profile"),
+        ),
+        "media",
+        "reactions__user__profile",
+    )
      return base_queryset.prefetch_related("media")
     
     def get_permissions(self):

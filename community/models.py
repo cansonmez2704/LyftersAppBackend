@@ -222,7 +222,7 @@ class CommentReaction(models.Model):
         LIKE    = "like",    "Like"
         DISLIKE = "dislike", "Dislike"
 
-    user          = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="comment_reactions")
+    user          = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="comment_reactions")
     comment       = models.ForeignKey(Comment, on_delete=models.CASCADE, related_name="reactions")
     reaction_type = models.CharField(max_length=10, choices=ReactionType.choices, db_index=True)
     created_at    = models.DateTimeField(auto_now_add=True)
