@@ -55,14 +55,21 @@ class PostListSerializer(serializers.ModelSerializer):
 
 class PostDetailSerializer(PostListSerializer):
     comments = serializers.SerializerMethodField()
-    reactions = PostReactionSerializer(read_only=True, many=True)
+    user_reaction = serializers.SerializerMethodField()
     class Meta(PostListSerializer.Meta):
         fields = PostListSerializer.Meta.fields + (
-            "comments", "reactions",
+            "comments", "user_reaction",
         )
         read_only_fields = PostListSerializer.Meta.read_only_fields + (
-            "comments", "reactions",
+            "comments", "user_reaction",
         )
+
+    def get_user_reactions(self,obj):
+        user = self.request.context["request"].user
+        if user.is_anonymous:
+            return None
+        reaction = next((r for r in obj.reactions.all() if r.user_id == user.id), None)
+        return reaction.reaction_type if reaction else None
     
     def get_comments(self,obj):
         return CommentSerializer(obj.comments.all(), many=True).data

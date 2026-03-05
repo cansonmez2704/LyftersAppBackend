@@ -1,4 +1,4 @@
-from django.db.models import Q , F , Value 
+from django.db.models import Q , F , Value , Prefetch
 from django.db.models.functions import Greatest
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.decorators import action
@@ -53,7 +53,7 @@ class PostViewSet(ModelViewSet):
         instance.save(update_fields=['is_deleted'])
     
     @action(detail=True, methods=["POST"])
-    def react_to_posts(self, request, pk=None):
+    def react_to_posts(self, request, pk=None,url_path="react"):
      post = self.get_object()
      msg, code = toggle_reaction(
         reaction_model=PostReaction,
@@ -64,6 +64,22 @@ class PostViewSet(ModelViewSet):
         valid_choices=[PostReaction.ReactionType.LIKE, PostReaction.ReactionType.DISLIKE],
      )
      return Response({"status": msg}, status=code)
+    
+    @action(detail=True,methods=["GET"])
+    def reactions(self,request,pk=None):
+       post = self.get_object()
+       reaction_qs = post.reactions.select_related("user__profile").all() 
+       reaction_type = request.query_params.get('type')
+       if reaction_type:
+          reaction_qs = reaction_qs.filter(reaction_type=reaction_type)
+       
+       page = self.paginate_queryset(reactions_qs)
+       if page is not None:
+            serializer = PostReactionSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+       
+       serializer = PostReactionSerializer(reactions_qs, many=True, context={'request': request})
+       return Response(serializer.data)
   
 
 
@@ -100,3 +116,93 @@ class CommentViewSet(ModelViewSet):
      Post.objects.filter(id=instance.post_id).update(
         comments_count=Greatest(F("comments_count") - 1, Value(0))
      )
+
+    @action(detail=True, methods=["POST"])
+    def react_to_comments(self, request, pk=None):
+     comment = self.get_object()
+     msg, code = toggle_reaction(
+        reaction_model=CommentReaction,
+        parent_obj=comment,
+        parent_field_name="comment",
+        user=request.user,
+        reaction_type=request.data.get("reaction_type"),
+        valid_choices=[CommentReaction.ReactionType.LIKE, CommentReaction.ReactionType.DISLIKE],
+     )
+     return Response({"status": msg}, status=code) 
+
+
+
+
+
+    
+class PostViewSet(ModelViewSet):
+   
+
+    def get_serializer_class(self):
+     if self.action == 'retrieve':
+        return PostDetailSerializer
+     return PostListSerializer
+
+    def get_queryset(self):
+     base_queryset = Post.objects.filter(is_deleted=False).select_related("author__profile")
+
+     if not self.request.user.is_staff:
+        base_queryset = base_queryset.filter(
+            Q(author=self.request.user) | Q(visibility=Post.Visibility.PUBLIC)
+        )
+
+     if self.action == 'retrieve':
+        return base_queryset.prefetch_related(
+        Prefetch(
+            "comments",
+            queryset=Comment.objects.filter(is_deleted=False)
+                          .select_related("author__profile")
+                          .prefetch_related("reactions__user__profile"),
+        ),
+        "media",
+        "reactions__user__profile",
+    )
+     return base_queryset.prefetch_related("media")
+    
+    def get_permissions(self):
+        if self.action in ['update', 'partial_update', 'destroy']:
+            return [permissions.IsAuthenticated(), IsOwner()]
+        return [permissions.IsAuthenticated()]
+        
+    def perform_create(self, serializer):
+        serializer.save(author=self.request.user)
+        
+    def perform_destroy(self, instance):
+        instance.is_deleted = True
+        instance.save(update_fields=['is_deleted'])
+    
+    @action(detail=True, methods=["POST"])
+    def react_to_posts(self, request, pk=None):
+     post = self.get_object()
+     msg, code = toggle_reaction(
+        reaction_model=PostReaction,
+        parent_obj=post,
+        parent_field_name="post",
+        user=request.user,
+        reaction_type=request.data.get("reaction_type"),
+        valid_choices=[PostReaction.ReactionType.LIKE, PostReaction.ReactionType.DISLIKE],
+     )
+     return Response({"status": msg}, status=code)
+    
+    @action(detail=True,methods=["GET"])
+    def reactions(self,request):
+       comment = self.get_object()
+       reaction_qs = post.reactions.select_related("user__profile").all() 
+       reaction_type = request.query_params.get('type')
+       if reaction_type:
+          reaction_qs = reaction_qs.filter(reaction_type=reaction_type)
+       
+       page = self.paginate_queryset(reactions_qs)
+       if page is not None:
+            serializer = PostReactionSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+       
+       serializer = PostReactionSerializer(reactions_qs, many=True, context={'request': request})
+       return Response(serializer.data)
+  
+ 

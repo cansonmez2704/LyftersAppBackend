@@ -1,7 +1,10 @@
 from django.db import models
 from django.conf import settings
 from django.utils.text import slugify
-import uuid
+from django.core.validators import FileExtensionValidator
+from django.core.exceptions import ValidationError
+import uuid, os 
+
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +50,7 @@ class Post(models.Model):
 
    
     title       = models.CharField(max_length=300, blank=True, help_text="Optional headline for the post.")
-    slug        = models.SlugField(max_length=350, blank=True, db_index=True, help_text="Auto-generated from title.")
+    slug        = models.SlugField(max_length=350, blank=True, unique=True, help_text="Auto-generated from title.")
     description = models.TextField(help_text="Main body / caption of the post.")
     cover_image = models.ImageField(
         upload_to=post_cover_upload_path,
@@ -95,7 +98,6 @@ class Post(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["-created_at"]
         verbose_name = "Post"
         verbose_name_plural = "Posts"
         indexes = [
@@ -105,7 +107,7 @@ class Post(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        # Auto-generate slug from title (fallback to UUID fragment)
+        
         if self.title and not self.slug:
             base_slug = slugify(self.title)
             self.slug = f"{base_slug}-{str(self.uuid)[:8]}" if base_slug else str(self.uuid)[:8]
@@ -116,9 +118,8 @@ class Post(models.Model):
 
     @property
     def reaction_score(self) -> int:
-        """Simple engagement score: likes minus dislikes."""
+     
         return self.likes_count - self.dislikes_count
-
 
 
 class PostMedia(models.Model):
@@ -127,14 +128,47 @@ class PostMedia(models.Model):
         IMAGE = "image", "Image"
         VIDEO = "video", "Video"
 
-    post       = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="media")
+    post       = models.ForeignKey("Post", on_delete=models.CASCADE, related_name="media")
     media_type = models.CharField(max_length=10, choices=MediaType.choices, default=MediaType.IMAGE)
-    file       = models.FileField(upload_to=post_image_upload_path)
+    
+    file       = models.FileField(
+        upload_to=post_image_upload_path,
+        validators=[FileExtensionValidator(
+            ['jpg', 'jpeg', 'png', 'gif', 'mp4', 'avi', 'mov', 'mkv', 'webm']
+        )]
+    )
+    
     order      = models.PositiveSmallIntegerField(default=0, help_text="Display order within the post.")
     alt_text   = models.CharField(max_length=255, blank=True, help_text="Accessibility description.")
 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        super().clean()
+        
+        if not self.file:
+            return
+
+        ext = os.path.splitext(self.file.name)[1].lower()
+        image_exts = ['.jpg', '.jpeg', '.png', '.gif']
+        video_exts = ['.mp4', '.avi', '.mov', '.mkv', '.webm']
+
+        if self.media_type == self.MediaType.IMAGE and ext not in image_exts:
+            raise ValidationError({"file": f"Expected an image file, but got {ext}."})
+            
+        elif self.media_type == self.MediaType.VIDEO and ext not in video_exts:
+            raise ValidationError({"file": f"Expected a video file, but got {ext}."})
+
+        limit_mb = 10 if self.media_type == self.MediaType.IMAGE else 100
+        limit_bytes = limit_mb * 1024 * 1024
+
+        if self.file.size > limit_bytes:
+            raise ValidationError(
+                {"file": f"Maximum file size for {self.media_type} is {limit_mb}MB. "
+                         f"Your file is {self.file.size / (1024 * 1024):.1f}MB."}
+            )
     class Meta:
-        ordering = ["order"]
         verbose_name = "Post Media"
         verbose_name_plural = "Post Media"
 
@@ -162,6 +196,7 @@ class Comment(models.Model):
     )
 
     body = models.TextField(help_text="The comment text.")
+    depth = models.PositiveSmallIntegerField(default=0)
 
     likes_count    = models.PositiveIntegerField(default=0)
     dislikes_count = models.PositiveIntegerField(default=0)
@@ -172,7 +207,6 @@ class Comment(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["created_at"]
         verbose_name = "Comment"
         verbose_name_plural = "Comments"
         indexes = [
@@ -180,21 +214,42 @@ class Comment(models.Model):
             models.Index(fields=["author", "-created_at"]),
         ]
 
+    def clean(self):
+        super().clean()
+        
+        intended_depth = 0
+        if self.parent:
+            intended_depth = self.parent.depth + 1
+        if self.parent and self.parent.post != self.post:
+            raise ValidationError("Replies must belong to the same post as the parent comment.")
+        if self.parent and self.parent.is_deleted:
+            raise ValidationError("Cannot reply to a deleted comment.")
+        if not self.body:
+            raise ValidationError("Comment body cannot be empty.")
+            
+        MAX_COMMENT_DEPTH = 3 
+        if intended_depth > MAX_COMMENT_DEPTH:
+            raise ValidationError(f"You cannot reply more than {MAX_COMMENT_DEPTH} levels deep.")
+            
+        self.depth = intended_depth
+        
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        
     def __str__(self) -> str:
         snippet = self.body[:60] + ("…" if len(self.body) > 60 else "")
         return f'Comment by {self.author} on "{self.post}": {snippet}'
+        
 
     @property
     def is_reply(self) -> bool:
         return self.parent_id is not None
 
-
-
-class PostReaction(models.Model):
-   
-    class ReactionType(models.TextChoices):
+class ReactionType(models.TextChoices):
         LIKE    = "like",    "Like"
         DISLIKE = "dislike", "Dislike"
+
+class PostReaction(models.Model):
 
     user          = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="post_reactions")
     post          = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="reactions")
@@ -216,13 +271,8 @@ class PostReaction(models.Model):
 
 
 class CommentReaction(models.Model):
-    
 
-    class ReactionType(models.TextChoices):
-        LIKE    = "like",    "Like"
-        DISLIKE = "dislike", "Dislike"
-
-    user          = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="comment_reactions")
+    user          = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name="comment_reactions")
     comment       = models.ForeignKey(Comment, on_delete=models.CASCADE, related_name="reactions")
     reaction_type = models.CharField(max_length=10, choices=ReactionType.choices, db_index=True)
     created_at    = models.DateTimeField(auto_now_add=True)
