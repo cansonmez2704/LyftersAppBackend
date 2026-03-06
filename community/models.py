@@ -101,6 +101,7 @@ class Post(models.Model):
         verbose_name = "Post"
         verbose_name_plural = "Posts"
         indexes = [
+            models.Index(fields=["is_deleted", "is_archived", "-created_at"]),
             models.Index(fields=["author", "-created_at"]),
             models.Index(fields=["visibility", "is_archived", "-created_at"]),
             models.Index(fields=["post_type", "-created_at"]),
@@ -169,8 +170,12 @@ class PostMedia(models.Model):
                          f"Your file is {self.file.size / (1024 * 1024):.1f}MB."}
             )
     class Meta:
+        indexes = [
+            models.Index(fields=["post", "order"])
+        ]
         verbose_name = "Post Media"
         verbose_name_plural = "Post Media"
+        
 
     def __str__(self) -> str:
         return f"{self.get_media_type_display()} for Post {self.post_id} (#{self.order})"
@@ -212,6 +217,9 @@ class Comment(models.Model):
         indexes = [
             models.Index(fields=["post", "parent", "created_at"]),
             models.Index(fields=["author", "-created_at"]),
+            models.Index(fields=["is_deleted", "-created_at"]),
+            models.Index(fields=["post", "parent"]),
+            models.Index(fields=["post", "-created_at"]),
         ]
 
     def clean(self):
@@ -272,7 +280,7 @@ class PostReaction(models.Model):
 
 class CommentReaction(models.Model):
 
-    user          = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name="comment_reactions")
+    user          = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="comment_reactions")
     comment       = models.ForeignKey(Comment, on_delete=models.CASCADE, related_name="reactions")
     reaction_type = models.CharField(max_length=10, choices=ReactionType.choices, db_index=True)
     created_at    = models.DateTimeField(auto_now_add=True)
