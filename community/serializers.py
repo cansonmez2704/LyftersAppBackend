@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from users.serializers import MiniUserProfileSerializer
 from .models import Post , PostMedia , PostReaction , Comment , CommentReaction
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 class PostMediaSerializer(serializers.ModelSerializer):
     class Meta:
@@ -43,17 +44,15 @@ class CommentSerializer(serializers.ModelSerializer):
             
         return data
 
-    def validate(self, attrs):
-        parent = attrs.get('parent')
-        post = attrs.get('post')
-        if parent:
-            if parent.post != post:
-                raise serializers.ValidationError("Replies must belong to the same post.")
-            if parent.is_deleted:
-                raise serializers.ValidationError("Cannot reply to a deleted comment.")
-            if parent.depth >= 3:
-                raise serializers.ValidationError("Maximum nesting depth reached.")
-        return attrs
+    def validate(self, data):
+        instance = Comment(**data)
+        try:
+            instance.clean()
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message_dict if hasattr(e, 'message_dict') else str(e))  
+
+        data['depth'] = instance.depth       
+        return data
 
 
 
@@ -129,5 +128,13 @@ class PostWriteSerializer(serializers.ModelSerializer):
                 PostMedia(post=instance, **item) for item in media_data
             ])
         return instance
+    
+    def validate(self, data):
+        instance = PostMedia(**data)
+        try:
+            instance.clean()
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message_dict if hasattr(e, 'message_dict') else str(e))
+        return data
 
     
