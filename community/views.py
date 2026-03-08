@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from common.permissions import IsOwner
 from common.reactions import toggle_reaction
 
+
 from .serializers import (
     PostListSerializer, 
     PostDetailSerializer, 
@@ -17,7 +18,7 @@ from .serializers import (
     PostReactionSerializer,
     PostWriteSerializer 
 )
-from .models import Post, Comment, PostReaction, CommentReaction
+from .models import Post, Comment, PostReaction, CommentReaction , ReactionType
 from common.pagination import FeedCursorPagination, CommentLimitOffsetPagination
 
 class PostViewSet(ModelViewSet):
@@ -25,11 +26,13 @@ class PostViewSet(ModelViewSet):
     pagination_class = FeedCursorPagination
 
     def get_serializer_class(self):
-     if self.action == 'retrieve':
+      if self.action == 'retrieve':
         return PostDetailSerializer
-     elif self.action in ["create","update","partial_update"]:
+     
+      elif self.action in ["create","update","partial_update"]:
         return PostWriteSerializer
-     return PostListSerializer
+      
+      return PostListSerializer
 
     def get_queryset(self):
      base_queryset = Post.objects.filter(is_deleted=False).select_related("author__profile")
@@ -73,7 +76,7 @@ class PostViewSet(ModelViewSet):
         parent_field_name="post",
         user=request.user,
         reaction_type=request.data.get("reaction_type"),
-        valid_choices=[PostReaction.ReactionType.LIKE, PostReaction.ReactionType.DISLIKE],
+        valid_choices=[PostReaction.LIKE, PostReaction.DISLIKE],
      )
      return Response({"status": msg}, status=code)
     
@@ -111,8 +114,7 @@ class CommentViewSet(ModelViewSet):
             queryset = queryset.filter(
                 Q(post__visibility='public') | Q(post__author=self.request.user)
             )
-        else:
-            queryset = queryset.filter(post__visibility='public')
+        
 
         post_id = self.request.query_params.get('post')
         if post_id:
@@ -147,7 +149,7 @@ class CommentViewSet(ModelViewSet):
         parent_field_name="comment",
         user=request.user,
         reaction_type=request.data.get("reaction_type"),
-        valid_choices=[CommentReaction.ReactionType.LIKE, CommentReaction.ReactionType.DISLIKE],
+        valid_choices=[ReactionType.LIKE, ReactionType.DISLIKE],
      )
      return Response({"status": msg}, status=code) 
 

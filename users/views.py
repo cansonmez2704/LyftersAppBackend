@@ -1,10 +1,11 @@
 from rest_framework import generics, status , permissions
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny , IsAdminUser , IsAuthenticated
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken , OutstandingToken , BlacklistedToken , TokenError
 from django.contrib.auth import get_user_model
 from .models import UserProfile
-from .serializers import UserRegisterSerializer , FullUserProfileSerializer , MiniUserProfileSerializer
+from .serializers import UserRegisterSerializer , FullUserProfileSerializer , MiniUserProfileSerializer , ChangePasswordSerializer
 from common.permissions import IsOwner
 
 User = get_user_model()
@@ -29,6 +30,55 @@ class RegisterView(generics.CreateAPIView):
             }
         }, status=status.HTTP_201_CREATED)
 
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            refresh_token = request.data.get("refresh")
+            if not refresh_token:
+                return Response(
+                    {"error": "Refresh token is required to log out."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            return Response(
+                {"message": "Successfully logged out."}, 
+                status=status.HTTP_205_RESET_CONTENT
+            )
+            
+        except TokenError:
+            return Response(
+                {"error": "Token is invalid or already logged out."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request, *args, **kwargs):
+        serializer = ChangePasswordSerializer(
+            data=request.data, 
+            context={'request': request} 
+        )
+        
+        if serializer.is_valid():
+            user = request.user
+            user.set_password(serializer.validated_data['new_password'])
+            user.save()
+
+            active_tokens = OutstandingToken.objects.filter(user=user)
+            
+            for token in active_tokens:
+                BlacklistedToken.objects.get_or_create(token=token)    
+            
+            return Response(
+                {"message": "Password updated successfully."}, 
+                status=status.HTTP_200_OK
+            )
+            
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class MyProfileView(generics.RetrieveUpdateAPIView):
     serializer_class = FullUserProfileSerializer

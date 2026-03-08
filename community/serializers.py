@@ -8,6 +8,7 @@ class PostMediaSerializer(serializers.ModelSerializer):
         model = PostMedia
         fields = ("id","media_type","file","order","alt_text")
 
+
 class PostReactionSerializer(serializers.ModelSerializer):
     user = MiniUserProfileSerializer(source="user.profile",read_only=True)
     class Meta:
@@ -102,6 +103,14 @@ class PostMediaWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = PostMedia
         fields = ("media_type", "file", "order", "alt_text")
+    
+    def validate(self, data):
+        instance = PostMedia(**data)
+        try:
+            instance.clean()
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message_dict if hasattr(e, 'message_dict') else str(e))
+        return data
 
 
 class PostWriteSerializer(serializers.ModelSerializer):
@@ -129,12 +138,6 @@ class PostWriteSerializer(serializers.ModelSerializer):
             ])
         return instance
     
-    def validate(self, data):
-        instance = PostMedia(**data)
-        try:
-            instance.clean()
-        except DjangoValidationError as e:
-            raise serializers.ValidationError(e.message_dict if hasattr(e, 'message_dict') else str(e))
-        return data
+    
 
     
