@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
+from django.db.models import Q , F
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -65,6 +66,8 @@ class UserProfile(models.Model):
         blank=True,
     )
     is_public = models.BooleanField(default=True)
+    followers_count = models.PositiveIntegerField(default=0)
+    following_count = models.PositiveIntegerField(default=0)
     bio = models.CharField(max_length=2000, blank=True, default="")
     height = models.PositiveSmallIntegerField(
         null=True,
@@ -113,3 +116,41 @@ def create_user_profile(sender, instance, created, **kwargs):
         transaction.on_commit(
             lambda: UserProfile.objects.get_or_create(user=instance)
         )
+
+class UserFollower(models.Model):
+    class FollowStatus(models.TextChoices):
+        PENDING = "P", "Pending"
+        ACCEPTED = "A", "Accepted"
+    
+
+    follower = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="followers")
+    following = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="following")
+    
+    status = models.CharField(max_length=1, choices=FollowStatus.choices, default=FollowStatus.PENDING)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "User Follower"
+        verbose_name_plural = "User Followers"
+        indexes = [
+            models.Index(fields=["follower", "status"]),
+            models.Index(fields=["following", "status"]),
+            models.Index(fields=["following", "created_at"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["follower", "following"], 
+                name="unique_user_follow"
+            ),
+            models.CheckConstraint(
+                check=~Q(follower=F("following")),
+                name="prevent_self_follow",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.follower} follows {self.following} ({self.get_status_display()})"
+        
+  

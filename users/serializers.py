@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import UserProfile , User
+from .models import UserProfile , User , UserFollower
 from rest_framework.exceptions import ValidationError
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -47,16 +47,46 @@ class UserRegisterSerializer(serializers.ModelSerializer):
         )
         return user
 
+class MiniUserProfileSerializer(serializers.ModelSerializer):
+    user = UserSerializer()
+    class Meta:
+        model = UserProfile
+        fields = ("user","avatar")  
+
+class UserFollowerSerializer(serializers.ModelSerializer):
+    following_profile = MiniUserProfileSerializer(source='following.profile', read_only=True)
+    
+    class Meta:
+        model = UserFollower
+        fields = ("follower",  "following", "following_profile", "status")
 
 class FullUserProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer()
     posts = serializers.SerializerMethodField()
     workouts = serializers.SerializerMethodField()
+    follow = serializers.SerializerMethodField()
+    
 
     class Meta:
         model = UserProfile
-        fields = ("user","avatar","bio","height","weight","gender","birth_date","posts","workouts")
+        fields = ("user","avatar","bio","follow","followers_count","following_count","height","weight","gender","birth_date","posts","workouts")
     
+    def get_follow(self, obj):
+        request = self.context.get('request')
+
+        if not request or not request.user.is_authenticated:
+            return None
+            
+        follower_record = UserFollower.objects.filter(
+            follower=request.user, 
+            following=obj.user
+        ).first()
+        
+        if follower_record:
+            return follower_record.status
+            
+        return None
+        
     def get_posts(self, obj):
         from community.serializers import PostListSerializer
         posts = (
@@ -81,8 +111,3 @@ class FullUserProfileSerializer(serializers.ModelSerializer):
         )
         return WorkoutSerializer(workouts, many=True).data  
 
-class MiniUserProfileSerializer(serializers.ModelSerializer):
-    user = UserSerializer()
-    class Meta:
-        model = UserProfile
-        fields = ("user","avatar")  

@@ -1,11 +1,14 @@
+from django.contrib.auth import get_user_model
+from django.db.models import Q , F
+from django.shortcuts import get_object_or_404
+from django.core.exceptions import ValidationError
 from rest_framework import generics, status , permissions
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny , IsAdminUser , IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken , OutstandingToken , BlacklistedToken , TokenError
-from django.contrib.auth import get_user_model
-from .models import UserProfile
-from .serializers import UserRegisterSerializer , FullUserProfileSerializer , MiniUserProfileSerializer , ChangePasswordSerializer
+from .models import UserProfile , UserFollower
+from .serializers import UserRegisterSerializer , FullUserProfileSerializer , MiniUserProfileSerializer , ChangePasswordSerializer , UserFollowerSerializer
 from common.permissions import IsOwner
 
 User = get_user_model()
@@ -108,6 +111,14 @@ class UserProfileView(generics.RetrieveAPIView):
         else:
             serializer = MiniUserProfileSerializer(profile, context={'request': request})
         return Response(serializer.data)
+    
+
+
+
+
+
+        
+    
 
         
     
