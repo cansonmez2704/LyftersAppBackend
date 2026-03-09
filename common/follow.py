@@ -2,7 +2,8 @@ from django.db import transaction
 from django.db.models import F, Value
 from django.db.models.functions import Greatest
 from rest_framework.exceptions import ValidationError
-
+from rest_framework.response import Response
+from rest_framework import status
 
 def toggle_follow(*, follow_model, follower, target_profile):
   
@@ -60,7 +61,7 @@ def toggle_follow(*, follow_model, follower, target_profile):
                 profile_model.objects.filter(pk=follower_profile.pk).update(
                     following_count=F("following_count") + 1,
                 )
-                return ("Following", 201)
+                return Response({"status": "Following"}, status=status.HTTP_201_CREATED)
 
             else:
                 
@@ -69,7 +70,7 @@ def toggle_follow(*, follow_model, follower, target_profile):
                     following=target_profile.user,
                     status=follow_model.FollowStatus.PENDING,
                 )
-                return ("Follow request sent", 201)
+                return Response({"status": "Follow request sent"}, status=status.HTTP_201_CREATED)
 
         else:
             
@@ -88,9 +89,9 @@ def toggle_follow(*, follow_model, follower, target_profile):
                         F("following_count") - 1, Value(0)
                     ),
                 )
-                return ("Unfollowed", 200)
+                return Response({"status": "Unfollowed"}, status=status.HTTP_200_OK)
 
             else:
                 
                 existing.delete()
-                return ("Follow request cancelled", 200)
+                return Response({"status": "Follow request cancelled"}, status=status.HTTP_200_OK)

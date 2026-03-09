@@ -19,10 +19,12 @@ urlpatterns = [
     path("my-profile/", MyProfileView.as_view(), name="my-profile"),
     path("profiles/<uuid:uuid>/", UserProfileView.as_view(), name="user-profile"),
 
-    # Follow system
-    path("<uuid:uuid>/follow/", FollowUserView.as_view(), name="follow-toggle"),
-    path("<uuid:uuid>/followers/", FollowerListView.as_view(), name="follower-list"),
-    path("<uuid:uuid>/following/", FollowingListView.as_view(), name="following-list"),
-    path("followers/<uuid:uuid>/accept/", AcceptFollowView.as_view(), name="follow-accept"),
-    path("followers/<uuid:uuid>/reject/", RejectFollowView.as_view(), name="follow-reject"),
+    # Follow actions
+    path("profiles/<uuid:uuid>/follow/", FollowUserView.as_view(), name="follow-user"),
+    path("follow-requests/<uuid:uuid>/accept/", AcceptFollowView.as_view(), name="accept-follow"),
+    path("follow-requests/<uuid:uuid>/reject/", RejectFollowView.as_view(), name="reject-follow"),
+
+    # Follower / Following lists
+    path("profiles/<uuid:uuid>/followers/", FollowerListView.as_view(), name="follower-list"),
+    path("profiles/<uuid:uuid>/following/", FollowingListView.as_view(), name="following-list"),
 ]

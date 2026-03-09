@@ -123,8 +123,8 @@ class UserFollower(models.Model):
         ACCEPTED = "A", "Accepted"
     
 
-    follower = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="followers")
-    following = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="following")
+    follower = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="following_relation")
+    following = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="followers_relation")
     
     status = models.CharField(max_length=1, choices=FollowStatus.choices, default=FollowStatus.PENDING)
     

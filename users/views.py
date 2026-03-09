@@ -1,15 +1,19 @@
 from django.contrib.auth import get_user_model
-from django.db.models import Q , F
+from django.db import transaction
+from django.db.models import Q, F
 from django.shortcuts import get_object_or_404
-from django.core.exceptions import ValidationError
-from rest_framework import generics, status , permissions
+from rest_framework.exceptions import PermissionDenied , ValidationError
+from rest_framework import generics, status, permissions
+from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny , IsAdminUser , IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken , OutstandingToken , BlacklistedToken , TokenError
-from .models import UserProfile , UserFollower
-from .serializers import UserRegisterSerializer , FullUserProfileSerializer , MiniUserProfileSerializer , ChangePasswordSerializer , UserFollowerSerializer
+from rest_framework_simplejwt.tokens import RefreshToken, OutstandingToken, BlacklistedToken, TokenError
+from .models import UserProfile, UserFollower
+from .serializers import UserRegisterSerializer, FullUserProfileSerializer, MiniUserProfileSerializer, ChangePasswordSerializer, UserFollowerSerializer
 from common.permissions import IsOwner
+from common.pagination import FeedCursorPagination
+from common.follow import toggle_follow
 
 User = get_user_model()
 class RegisterView(generics.CreateAPIView):
@@ -111,14 +115,136 @@ class UserProfileView(generics.RetrieveAPIView):
         else:
             serializer = MiniUserProfileSerializer(profile, context={'request': request})
         return Response(serializer.data)
-    
 
 
+class FollowUserView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, uuid):
+        target_profile = get_object_or_404(
+            UserProfile.objects.select_related("user"),
+            user__uuid=uuid,
+        )
+        return toggle_follow(
+            follow_model=UserFollower,
+            follower=request.user,
+            target_profile=target_profile,
+        )
 
 
+class AcceptFollowView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, uuid):
+        follow_request = get_object_or_404(
+            UserFollower,
+            follower__uuid=uuid,
+            following=request.user,
+            status=UserFollower.FollowStatus.PENDING,
+        )
+
+        with transaction.atomic():
+            follower_profile = UserProfile.objects.get(user=follow_request.follower)
+            target_profile = request.user.profile
+
+            ordered_pks = sorted([follower_profile.pk, target_profile.pk])
+            locked_profiles = {
+                p.pk: p
+                for p in UserProfile.objects.select_for_update().filter(pk__in=ordered_pks)
+            }
+
+            follow_request.status = UserFollower.FollowStatus.ACCEPTED
+            follow_request.save(update_fields=["status"])
+
+            UserProfile.objects.filter(pk=target_profile.pk).update(
+                followers_count=F("followers_count") + 1,
+            )
+            UserProfile.objects.filter(pk=follower_profile.pk).update(
+                following_count=F("following_count") + 1,
+            )
+
+        return Response({"status": "Follow request accepted"}, status=status.HTTP_200_OK)
+
+
+class RejectFollowView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, uuid):
+        follow_request = get_object_or_404(
+            UserFollower,
+            follower__uuid=uuid,
+            following=request.user,
+            status=UserFollower.FollowStatus.PENDING,
+        )
+        follow_request.delete()
+        return Response({"status": "Follow request rejected"}, status=status.HTTP_200_OK)
+
+class FollowerListView(generics.ListAPIView):
+    serializer_class = MiniUserProfileSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = FeedCursorPagination
+    filter_backends = [SearchFilter]
+    search_fields = ["user__username"]
+
+    def get_queryset(self):
+        target_profile = get_object_or_404(
+            UserProfile.objects.select_related('user'), 
+            user__uuid=self.kwargs["uuid"]
+        )
+
+        if not target_profile.is_public and target_profile.user != self.request.user:
+            has_access = UserFollower.objects.filter(
+                follower=self.request.user, 
+                following=target_profile.user, 
+                status=UserFollower.FollowStatus.ACCEPTED
+            ).exists()
+            
+            if not has_access:
+                raise PermissionDenied("This profile is private.")
+
+        return (
+            UserProfile.objects
+            .filter(
+                user__follower_relations__following__uuid=self.kwargs["uuid"],
+                user__follower_relations__status=UserFollower.FollowStatus.ACCEPTED,
+            )
+            .select_related("user")
+        )
+
+class FollowingListView(generics.ListAPIView):
+    serializer_class = MiniUserProfileSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = FeedCursorPagination
+    filter_backends = [SearchFilter]
+    search_fields = ["user__username"]
+
+    def get_queryset(self):
+        
+        target_profile = get_object_or_404(
+            UserProfile.objects.select_related('user'), 
+            user__uuid=self.kwargs["uuid"]
+        )
+
+ 
+        if not target_profile.is_public and target_profile.user != self.request.user:
+            has_access = UserFollower.objects.filter(
+                follower=self.request.user, 
+                following=target_profile.user, 
+                status=UserFollower.FollowStatus.ACCEPTED
+            ).exists()
+            
+            if not has_access:
+                raise PermissionDenied("This profile is private.")
 
         
-    
+        return (
+            UserProfile.objects
+            .filter(
+                user__following_relations__follower__uuid=self.kwargs["uuid"],
+                user__following_relations__status=UserFollower.FollowStatus.ACCEPTED,
+            )
+            .select_related("user")
+        )
 
         
     
