@@ -123,8 +123,8 @@ class UserFollower(models.Model):
         ACCEPTED = "A", "Accepted"
     
 
-    follower = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="following_relation")
-    following = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="followers_relation")
+    from_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="outgoing_followers")
+    to_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="incoming_followers")
     
     status = models.CharField(max_length=1, choices=FollowStatus.choices, default=FollowStatus.PENDING)
     
@@ -135,22 +135,22 @@ class UserFollower(models.Model):
         verbose_name = "User Follower"
         verbose_name_plural = "User Followers"
         indexes = [
-            models.Index(fields=["follower", "status"]),
-            models.Index(fields=["following", "status"]),
-            models.Index(fields=["following", "created_at"]),
+            models.Index(fields=["from_user", "status"]),
+            models.Index(fields=["to_user", "status"]),
+            models.Index(fields=["to_user", "created_at"]),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["follower", "following"], 
+                fields=["from_user", "to_user"], 
                 name="unique_user_follow"
             ),
             models.CheckConstraint(
-                check=~Q(follower=F("following")),
+                check=~Q(from_user=F("to_user")),
                 name="prevent_self_follow",
             ),
         ]
 
     def __str__(self) -> str:
-        return f"{self.follower} follows {self.following} ({self.get_status_display()})"
+        return f"{self.from_user} follows {self.to_user} ({self.get_status_display()})"
         
   

@@ -127,7 +127,7 @@ class FollowUserView(APIView):
         )
         return toggle_follow(
             follow_model=UserFollower,
-            follower=request.user,
+            from_user=request.user,
             target_profile=target_profile,
         )
 
@@ -138,13 +138,13 @@ class AcceptFollowView(APIView):
     def post(self, request, uuid):
         follow_request = get_object_or_404(
             UserFollower,
-            follower__uuid=uuid,
-            following=request.user,
+            from_user__uuid=uuid,
+            to_user=request.user,
             status=UserFollower.FollowStatus.PENDING,
         )
 
         with transaction.atomic():
-            follower_profile = UserProfile.objects.get(user=follow_request.follower)
+            follower_profile = UserProfile.objects.get(user=follow_request.from_user)
             target_profile = request.user.profile
 
             ordered_pks = sorted([follower_profile.pk, target_profile.pk])
@@ -172,8 +172,8 @@ class RejectFollowView(APIView):
     def post(self, request, uuid):
         follow_request = get_object_or_404(
             UserFollower,
-            follower__uuid=uuid,
-            following=request.user,
+            from_user__uuid=uuid,
+            to_user=request.user,
             status=UserFollower.FollowStatus.PENDING,
         )
         follow_request.delete()
@@ -194,8 +194,8 @@ class FollowerListView(generics.ListAPIView):
 
         if not target_profile.is_public and target_profile.user != self.request.user:
             has_access = UserFollower.objects.filter(
-                follower=self.request.user, 
-                following=target_profile.user, 
+                from_user=self.request.user, 
+                to_user=target_profile.user, 
                 status=UserFollower.FollowStatus.ACCEPTED
             ).exists()
             
@@ -205,8 +205,8 @@ class FollowerListView(generics.ListAPIView):
         return (
             UserProfile.objects
             .filter(
-                user__follower_relations__following__uuid=self.kwargs["uuid"],
-                user__follower_relations__status=UserFollower.FollowStatus.ACCEPTED,
+                user__outgoing_followers__to_user__uuid=self.kwargs["uuid"],
+                user__outgoing_followers__status=UserFollower.FollowStatus.ACCEPTED,
             )
             .select_related("user")
         )
@@ -228,8 +228,8 @@ class FollowingListView(generics.ListAPIView):
  
         if not target_profile.is_public and target_profile.user != self.request.user:
             has_access = UserFollower.objects.filter(
-                follower=self.request.user, 
-                following=target_profile.user, 
+                from_user=self.request.user, 
+                to_user=target_profile.user, 
                 status=UserFollower.FollowStatus.ACCEPTED
             ).exists()
             
@@ -240,8 +240,8 @@ class FollowingListView(generics.ListAPIView):
         return (
             UserProfile.objects
             .filter(
-                user__following_relations__follower__uuid=self.kwargs["uuid"],
-                user__following_relations__status=UserFollower.FollowStatus.ACCEPTED,
+                user__incoming_followers__from_user__uuid=self.kwargs["uuid"],
+                user__incoming_followers__status=UserFollower.FollowStatus.ACCEPTED,
             )
             .select_related("user")
         )

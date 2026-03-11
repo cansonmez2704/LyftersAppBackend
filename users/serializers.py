@@ -54,11 +54,11 @@ class MiniUserProfileSerializer(serializers.ModelSerializer):
         fields = ("user","avatar")  
 
 class UserFollowerSerializer(serializers.ModelSerializer):
-    following_profile = MiniUserProfileSerializer(source='following.profile', read_only=True)
+    to_user_profile = MiniUserProfileSerializer(source='to_user.profile', read_only=True)
     
     class Meta:
         model = UserFollower
-        fields = ("follower",  "following", "following_profile", "status")
+        fields = ("from_user", "to_user", "to_user_profile", "status")
 
 class FullUserProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer()
@@ -78,8 +78,8 @@ class FullUserProfileSerializer(serializers.ModelSerializer):
             return None
             
         follower_record = UserFollower.objects.filter(
-            follower=request.user, 
-            following=obj.user
+            from_user=request.user, 
+            to_user=obj.user
         ).first()
         
         if follower_record:

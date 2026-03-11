@@ -70,7 +70,7 @@ class PostViewSet(ModelViewSet):
     @action(detail=True, methods=["POST"],url_path="react")
     def react_to_posts(self, request, pk=None):
      post = self.get_object()
-     msg, code = toggle_reaction(
+     return toggle_reaction(
         reaction_model=PostReaction,
         parent_obj=post,
         parent_field_name="post",
@@ -78,7 +78,7 @@ class PostViewSet(ModelViewSet):
         reaction_type=request.data.get("reaction_type"),
         valid_choices=[PostReaction.LIKE, PostReaction.DISLIKE],
      )
-     return Response({"status": msg}, status=code)
+     
     
     @action(detail=True,methods=["GET"])
     def reactions(self,request,pk=None):
@@ -143,7 +143,7 @@ class CommentViewSet(ModelViewSet):
     @action(detail=True, methods=["POST"],url_path="react")
     def react_to_comments(self, request, pk=None):
      comment = self.get_object()
-     msg, code = toggle_reaction(
+     return toggle_reaction(
         reaction_model=CommentReaction,
         parent_obj=comment,
         parent_field_name="comment",
@@ -151,7 +151,6 @@ class CommentViewSet(ModelViewSet):
         reaction_type=request.data.get("reaction_type"),
         valid_choices=[ReactionType.LIKE, ReactionType.DISLIKE],
      )
-     return Response({"status": msg}, status=code) 
 
 
 
