@@ -2,6 +2,7 @@ from django.db.models import Q, F, Value, Prefetch
 from django.db.models.functions import Greatest
 
 from rest_framework.viewsets import ModelViewSet
+from rest_framework.generics import ListAPIView
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework import permissions
@@ -18,7 +19,8 @@ from .serializers import (
     PostReactionSerializer,
     PostWriteSerializer 
 )
-from .models import Post, Comment, PostReaction, CommentReaction , ReactionType
+from .models import Post, Comment, PostReaction, CommentReaction , ReactionType 
+from users.models import UserFollower
 from common.pagination import FeedCursorPagination, CommentLimitOffsetPagination
 
 class PostViewSet(ModelViewSet):
@@ -39,8 +41,13 @@ class PostViewSet(ModelViewSet):
 
      if not self.request.user.is_staff and self.request.user.is_authenticated:
         base_queryset = base_queryset.filter(
-            Q(author=self.request.user) | Q(visibility=Post.Visibility.PUBLIC)
-        )
+           Q(author=self.request.user)
+           | Q(visibility=Post.Visibility.PUBLIC)
+           | Q(visibility=Post.Visibility.FOLLOWERS,
+            author__incoming_followers__from_user=self.request.user,
+            author__incoming_followers__status=UserFollower.FollowStatus.ACCEPTED,
+    )
+)
 
      if self.action == 'retrieve':
         return base_queryset.prefetch_related(
@@ -112,7 +119,8 @@ class CommentViewSet(ModelViewSet):
 
         if self.request.user.is_authenticated:
             queryset = queryset.filter(
-                Q(post__visibility='public') | Q(post__author=self.request.user)
+                Q(post__visibility=Post.Visibility.PUBLIC) | Q(post__author=self.request.user)
+                | Q(post__visibility=Post.Visibility.FOLLOWERS, post__author__incoming_followers__from_user=self.request.user, post__author__incoming_followers__status=UserFollower.FollowStatus.ACCEPTED)
             )
         
 
@@ -153,6 +161,31 @@ class CommentViewSet(ModelViewSet):
      )
 
 
+class FeedView(ListAPIView):
+    serializer_class = PostListSerializer
+    pagination_class = FeedCursorPagination
+    permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+     if self.request.user.is_staff:
+        return (
+            Post.objects.filter(is_deleted=False)
+            .select_related("author", "author__profile") 
+            .prefetch_related("media")
+            .order_by("-created_at")
+        )
 
+     following_ids = UserFollower.objects.filter(
+        from_user=self.request.user,
+        status=UserFollower.FollowStatus.ACCEPTED
+    ).values("to_user")
 
+     return (
+        Post.objects.filter(
+            author_id__in=following_ids,
+            is_deleted=False,
+        )
+        .select_related( "author__profile")
+        .prefetch_related("media")
+        .order_by("-created_at")
+    )
