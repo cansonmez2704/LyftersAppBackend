@@ -3,6 +3,8 @@
 import uuid
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, UserManager
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVector, SearchVectorField
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.db.models import Q , F
@@ -88,6 +90,7 @@ class UserProfile(models.Model):
         default="",
     )
     birth_date = models.DateField(null=True, blank=True)
+    search_vector = SearchVectorField(null=True)
     # --- Timestamps (match the rest of the project) ---
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -95,6 +98,9 @@ class UserProfile(models.Model):
     class Meta:
         verbose_name = "User Profile"
         verbose_name_plural = "User Profiles"
+        indexes = [
+            GinIndex(fields=["search_vector"], name="userprofile_search_gin"),
+        ]
    
     def __str__(self) -> str:
         return f"Profile of {self.user}"
@@ -116,6 +122,38 @@ def create_user_profile(sender, instance, created, **kwargs):
         transaction.on_commit(
             lambda: UserProfile.objects.get_or_create(user=instance)
         )
+    else:
+        # When username changes, update the profile search vector
+        transaction.on_commit(
+            lambda: _update_profile_search_vector(instance.pk)
+        )
+
+
+def _update_profile_search_vector(user_pk):
+    """Rebuild the search vector for a user's profile.
+    
+    Uses raw SQL because SearchVector with joined fields (user__username)
+    cannot be used in .update() — Django raises FieldError.
+    """
+    from django.db import connection
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            UPDATE users_userprofile
+            SET search_vector =
+                setweight(to_tsvector('english', COALESCE(u.username, '')), 'A') ||
+                setweight(to_tsvector('english', COALESCE(users_userprofile.bio, '')), 'B')
+            FROM users_user u
+            WHERE users_userprofile.user_id = u.id
+              AND users_userprofile.user_id = %s
+        """, [user_pk])
+
+
+@receiver(post_save, sender=UserProfile)
+def update_profile_search_vector(sender, instance, **kwargs):
+    """Update search vector whenever the profile itself is saved."""
+    transaction.on_commit(
+        lambda: _update_profile_search_vector(instance.user_id)
+    )
 
 class UserFollower(models.Model):
     class FollowStatus(models.TextChoices):

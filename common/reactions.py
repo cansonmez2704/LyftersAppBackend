@@ -8,55 +8,49 @@ from rest_framework import status
 
 def toggle_reaction(*, reaction_model, parent_obj, parent_field_name,
                     user, reaction_type, valid_choices):
-   with transaction.atomic():
-    
-    if reaction_type not in valid_choices:
-        raise ValidationError("Invalid reaction type.")
+    with transaction.atomic():
+        if reaction_type not in valid_choices:
+            raise ValidationError("Invalid reaction type.")
 
-    parent_model = parent_obj.__class__
-    lookup = {"user": user, parent_field_name: parent_obj}
+        parent_model = parent_obj.__class__
+        lookup = {"user": user, parent_field_name: parent_obj}
 
-    like_field = "likes_count"
-    dislike_field = "dislikes_count"
-    delta_field = like_field if reaction_type == "like" else dislike_field
-    opposite_field = dislike_field if reaction_type == "like" else like_field
+        like_field = "likes_count"
+        dislike_field = "dislikes_count"
+        delta_field = like_field if reaction_type == "like" else dislike_field
+        opposite_field = dislike_field if reaction_type == "like" else like_field
 
-    existing = reaction_model.objects.filter(**lookup).first()
+        existing = reaction_model.objects.filter(**lookup).first()
 
-    if not existing:
-       
-        try:
-            reaction_model.objects.create(**lookup, reaction_type=reaction_type)
-      
-        except IntegrityError:
-            raise ValidationError("Already reacted.")
-      
-        else:
+        if not existing:
+            try:
+                reaction_model.objects.create(**lookup, reaction_type=reaction_type)
+            except IntegrityError:
+                raise ValidationError("Already reacted.")
+            else:
                 parent_model.objects.select_for_update().filter(pk=parent_obj.pk).update(
                     **{delta_field: F(delta_field) + 1}
                 )
                 return Response({"status": "Reaction added"}, status=status.HTTP_201_CREATED)
 
-    if existing.reaction_type == reaction_type:
-        deleted_count, _ = reaction_model.objects.filter(pk=existing.pk).delete()
-        if not deleted_count:
-            raise ValidationError("Already removed.")
+        if existing.reaction_type == reaction_type:
+            deleted_count, _ = reaction_model.objects.filter(pk=existing.pk).delete()
+            if not deleted_count:
+                raise ValidationError("Already removed.")
 
-      
-        parent_model.objects.select_for_update().filter(pk=parent_obj.pk).update(
+            parent_model.objects.select_for_update().filter(pk=parent_obj.pk).update(
                 **{delta_field: Greatest(F(delta_field) - 1, Value(0))}
             )
-        return Response({"status": "Reaction removed"}, status=status.HTTP_200_OK)
+            return Response({"status": "Reaction removed"}, status=status.HTTP_200_OK)
 
-    updated_count = reaction_model.objects.filter(pk=existing.pk).update(
-        reaction_type=reaction_type,
-    )
-    if not updated_count:
-        raise ValidationError("Reaction already changed.")
+        updated_count = reaction_model.objects.filter(pk=existing.pk).update(
+            reaction_type=reaction_type,
+        )
+        if not updated_count:
+            raise ValidationError("Reaction already changed.")
 
-   
-    parent_model.objects.select_for_update().filter(pk=parent_obj.pk).update(**{
+        parent_model.objects.select_for_update().filter(pk=parent_obj.pk).update(**{
             delta_field: F(delta_field) + 1,
             opposite_field: Greatest(F(opposite_field) - 1, Value(0)),
         })
-    return Response({"status": "Reaction changed"}, status=status.HTTP_200_OK)
+        return Response({"status": "Reaction changed"}, status=status.HTTP_200_OK)

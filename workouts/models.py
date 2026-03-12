@@ -1,7 +1,11 @@
 
 from django.conf import settings
-from django.db import models
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVector, SearchVectorField
+from django.db import models, transaction
 from django.db.models import Q , F
+from django.db.models.signals import post_save, m2m_changed
+from django.dispatch import receiver
 class MuscleGroup(models.Model):
 
     name = models.CharField(max_length=100, unique=True)
@@ -69,6 +73,7 @@ class Exercise(models.Model):
         default="",
         help_text="e.g. 'Barbell, Bench' or 'Bodyweight'.",
     )
+    search_vector = SearchVectorField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     class Meta:
@@ -77,6 +82,7 @@ class Exercise(models.Model):
         verbose_name_plural = "Exercises"
         indexes = [
             models.Index(fields=["exercise_type", "movement_type"]),
+            GinIndex(fields=["search_vector"], name="exercise_search_gin"),
         ]
     def __str__(self) -> str:
         return f"{self.name} ({self.get_exercise_type_display()})"
@@ -121,6 +127,7 @@ class Workout(models.Model):
         db_index=True,
         help_text="Reusable template that others can copy.",
     )
+    search_vector = SearchVectorField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     class Meta:
@@ -130,6 +137,7 @@ class Workout(models.Model):
         indexes = [
             models.Index(fields=["owner", "visibility"]),
             models.Index(fields=["owner", "-created_at"]),
+            GinIndex(fields=["search_vector"], name="workout_search_gin"),
         ]
     def __str__(self) -> str:
         return f"{self.name} (by {self.owner})"
@@ -218,3 +226,49 @@ class WorkoutSet(models.Model):
         ]
     def __str__(self) -> str:
         return f"{self.workout_exercise} — Set {self.set_number}"
+
+
+# ---------------------------------------------------------------------------
+# Search-vector signals
+# ---------------------------------------------------------------------------
+
+def _update_exercise_search_vector(exercise_pk):
+    """Rebuild search vector for an Exercise."""
+    Exercise.objects.filter(pk=exercise_pk).update(
+        search_vector=(
+            SearchVector("name", weight="A")
+            + SearchVector("description", weight="B")
+        )
+    )
+
+
+def _update_workout_search_vector(workout_pk):
+    """Rebuild search vector for a Workout."""
+    Workout.objects.filter(pk=workout_pk).update(
+        search_vector=(
+            SearchVector("name", weight="A")
+            + SearchVector("description", weight="B")
+        )
+    )
+
+
+@receiver(post_save, sender=Exercise)
+def update_exercise_search_vector(sender, instance, **kwargs):
+    transaction.on_commit(
+        lambda: _update_exercise_search_vector(instance.pk)
+    )
+
+
+@receiver(m2m_changed, sender=Exercise.muscles.through)
+def update_exercise_search_vector_on_m2m(sender, instance, **kwargs):
+    """Also rebuild when muscles are added/removed."""
+    transaction.on_commit(
+        lambda: _update_exercise_search_vector(instance.pk)
+    )
+
+
+@receiver(post_save, sender=Workout)
+def update_workout_search_vector(sender, instance, **kwargs):
+    transaction.on_commit(
+        lambda: _update_workout_search_vector(instance.pk)
+    )

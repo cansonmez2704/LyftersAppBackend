@@ -2,6 +2,7 @@ from rest_framework import serializers
 from users.serializers import MiniUserProfileSerializer
 from .models import Post , PostMedia , PostReaction , Comment , CommentReaction
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 
 class PostMediaSerializer(serializers.ModelSerializer):
     class Meta:
@@ -118,25 +119,28 @@ class PostWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Post
         fields = ("title", "description", "cover_image", "post_type", "visibility", "linked_workout", "media")
+   
     def create(self, validated_data):
-        media_data = validated_data.pop("media", [])
-        post = Post.objects.create(**validated_data)
-        PostMedia.objects.bulk_create([
-            PostMedia(post=post, **item) for item in media_data
-        ])
-        return post
+        with transaction.atomic():
+            media_data = validated_data.pop("media", [])
+            post = Post.objects.create(**validated_data)
+            PostMedia.objects.bulk_create([
+                PostMedia(post=post, **item) for item in media_data
+            ])
+            return post
 
     def update(self, instance, validated_data):
-        media_data = validated_data.pop("media", None)
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-        if media_data is not None:
-            instance.media.all().delete()
-            PostMedia.objects.bulk_create([
-                PostMedia(post=instance, **item) for item in media_data
-            ])
-        return instance
+        with transaction.atomic():
+            media_data = validated_data.pop("media", None)
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+            instance.save()
+            if media_data is not None:
+                instance.media.all().delete()
+                PostMedia.objects.bulk_create([
+                    PostMedia(post=instance, **item) for item in media_data
+                ])
+            return instance
     
     
 

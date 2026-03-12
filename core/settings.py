@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "django_extensions",
     "drf_spectacular",
     "corsheaders",
@@ -74,6 +75,7 @@ REST_FRAMEWORK = {
         'anon': '100/day',        
         'user': '2000/day',       
         'reaction_spam': '20/min', 
+        "search": "30/min"
     }
 }
 
@@ -115,8 +117,12 @@ WSGI_APPLICATION = "core.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "gym_hub",
+        "USER": "postgres",
+        "PASSWORD": os.getenv("DB_PASSWORD"),
+        "HOST": "localhost",
+        "PORT": "5432",
     }
 }
 
