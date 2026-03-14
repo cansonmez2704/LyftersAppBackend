@@ -1,5 +1,7 @@
+from django.db import transaction
 from django.db.models import Q, F, Value, Prefetch
 from django.db.models.functions import Greatest
+
 
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.generics import ListAPIView
@@ -118,17 +120,13 @@ class CommentViewSet(ModelViewSet):
 
     def get_queryset(self):
         queryset = Comment.objects.filter(is_deleted=False)
-
-        if self.request.user.is_authenticated:
-            queryset = queryset.filter(
+        queryset = queryset.filter(
                 Q(post__visibility=Post.Visibility.PUBLIC) | Q(post__author=self.request.user)
                 | Q(post__visibility=Post.Visibility.FOLLOWERS, post__author__incoming_followers__from_user=self.request.user, post__author__incoming_followers__status=UserFollower.FollowStatus.ACCEPTED)
             )
-        
-
-        post_id = self.request.query_params.get('post')
-        if post_id:
-            queryset = queryset.filter(post_id=post_id)
+        post_uuid = self.request.query_params.get('post')
+        if post_uuid:
+            queryset = queryset.filter(post__uuid=post_uuid)
         return queryset.select_related("post", "author__profile").prefetch_related("reactions__user__profile")
 
     def perform_create(self, serializer):
@@ -137,18 +135,23 @@ class CommentViewSet(ModelViewSet):
             raise PermissionDenied("You cannot comment on this private post.")
 
         serializer.save(author=self.request.user)
-        Post.objects.filter(id=post.id).update(comments_count=F("comments_count") + 1)
+        Post.objects.filter(uuid=post.uuid).update(comments_count=F("comments_count") + 1)
         
     def perform_destroy(self, instance):
-     if instance.is_deleted:
-        return
+        if instance.is_deleted:
+            return
 
-     instance.is_deleted = True
-     instance.save(update_fields=['is_deleted'])
+        with transaction.atomic():
+            # "Promotion" Logic: If this is a parent, make its replies become parent comments
+            # instead of deleting them. This keeps the post comment-count accurate.
+            Comment.objects.filter(parent=instance).update(parent=None, depth=0)
 
-     Post.objects.filter(id=instance.post_id).update(
-        comments_count=Greatest(F("comments_count") - 1, Value(0))
-     )
+            instance.is_deleted = True
+            instance.save(update_fields=['is_deleted'])
+
+            Post.objects.filter(uuid=instance.post.uuid).update(
+                comments_count=Greatest(F("comments_count") - 1, Value(0))
+            )
 
     @action(detail=True, methods=["POST"],url_path="react")
     def react_to_comments(self, request, pk=None):

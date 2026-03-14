@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 from users.serializers import MiniUserProfileSerializer
 from .models import Post , PostMedia , PostReaction , Comment , CommentReaction
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -122,11 +123,21 @@ class PostWriteSerializer(serializers.ModelSerializer):
    
     def create(self, validated_data):
         with transaction.atomic():
-            media_data = validated_data.pop("media", [])
+            media_data = validated_data.pop("media",[])
             post = Post.objects.create(**validated_data)
-            PostMedia.objects.bulk_create([
-                PostMedia(post=post, **item) for item in media_data
-            ])
+
+            media_objs = [PostMedia(post=post,**item) for item in media_data]
+           
+            try:
+             
+             for obj in media_objs:
+                obj.full_clean()
+           
+            except DjangoValidationError as e:
+              raise serializers.ValidationError(e.message_dict if hasattr(e,"message_dict" ) else str(e)) 
+
+            PostMedia.objects.bulk_create(media_objs)
+
             return post
 
     def update(self, instance, validated_data):

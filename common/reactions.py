@@ -9,8 +9,11 @@ from rest_framework import status
 def toggle_reaction(*, reaction_model, parent_obj, parent_field_name,
                     user, reaction_type, valid_choices):
     with transaction.atomic():
+        if not reaction_type:
+            raise ValidationError({"reaction_type": "This field is required."})
+
         if reaction_type not in valid_choices:
-            raise ValidationError("Invalid reaction type.")
+            raise ValidationError({"reaction_type": f"Invalid choice. Must be one of: {', '.join(valid_choices)}"})
 
         parent_model = parent_obj.__class__
         lookup = {"user": user, parent_field_name: parent_obj}

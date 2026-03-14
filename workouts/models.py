@@ -1,4 +1,5 @@
 
+import uuid as uuid_lib
 from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector, SearchVectorField
@@ -6,9 +7,11 @@ from django.db import models, transaction
 from django.db.models import Q , F
 from django.db.models.signals import post_save, m2m_changed
 from django.dispatch import receiver
+
 class MuscleGroup(models.Model):
 
     name = models.CharField(max_length=100, unique=True)
+    slug = models.SlugField(max_length=100, unique=True)
     description = models.TextField(blank=True, default="")
     class Meta:
         ordering = ["name"]
@@ -32,6 +35,7 @@ class Exercise(models.Model):
         INTERMEDIATE = "intermediate", "Intermediate"
         ADVANCED = "advanced", "Advanced"
     name = models.CharField(max_length=200, unique=True)
+    slug = models.SlugField(max_length=200, unique=True)
     description = models.TextField(blank=True, default="")
     exercise_type = models.CharField(
         max_length=20,
@@ -127,6 +131,7 @@ class Workout(models.Model):
         db_index=True,
         help_text="Reusable template that others can copy.",
     )
+    uuid = models.UUIDField(default=uuid_lib.uuid4, editable=False, unique=True, db_index=True)
     search_vector = SearchVectorField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

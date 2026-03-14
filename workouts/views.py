@@ -12,7 +12,7 @@ class ExerciseViewSet(ModelViewSet):
     def get_permissions(self):
         if self.request.method != "GET":
             return [permissions.IsAdminUser()]
-        return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
 
 class WorkoutViewSet(ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOwnerOrReadOnly | permissions.IsAdminUser]

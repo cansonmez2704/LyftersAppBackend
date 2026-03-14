@@ -21,7 +21,7 @@ from workouts.models import Exercise, Workout
 
 
 class UserSearchResultSerializer(serializers.ModelSerializer):
-    """Minimal user result: uuid, username, avatar."""
+    
     username = serializers.CharField(source="user.username")
     uuid = serializers.UUIDField(source="user.uuid")
     rank = serializers.FloatField(read_only=True)
@@ -49,9 +49,6 @@ class WorkoutSearchResultSerializer(serializers.ModelSerializer):
         fields = ("id", "name", "description", "owner", "rank")
 
 
-# ---------------------------------------------------------------------------
-# Hybrid search helper
-# ---------------------------------------------------------------------------
 
 SIMILARITY_THRESHOLD = 0.15
 FTS_THRESHOLD = 0.05
@@ -59,30 +56,20 @@ RESULTS_PER_TYPE = 10
 
 
 def _hybrid_search(queryset, term, search_fields_for_trigram):
-    """Run FTS (SearchRank) on the pre-built search_vector, then enrich
-    with TrigramSimilarity on the primary field for typo tolerance.
-
-    Returns an annotated queryset ordered by combined score.
-    """
+    
     search_query = SearchQuery(term, search_type="websearch")
 
-    # 1. FTS rank from the stored GIN-indexed vector
     qs = queryset.annotate(
         fts_rank=SearchRank("search_vector", search_query),
     )
-
-    # 2. Trigram similarity on the first (primary) text field
     primary_field = search_fields_for_trigram[0]
     qs = qs.annotate(
         trigram_sim=TrigramSimilarity(primary_field, term),
     )
 
-    # 3. Combined rank: whichever is higher
     qs = qs.annotate(
         rank=Greatest("fts_rank", "trigram_sim", output_field=FloatField()),
     )
-
-    # 4. Filter: keep rows that matched by either method
     qs = qs.filter(
         Q(fts_rank__gte=FTS_THRESHOLD) | Q(trigram_sim__gte=SIMILARITY_THRESHOLD)
     )
@@ -90,9 +77,6 @@ def _hybrid_search(queryset, term, search_fields_for_trigram):
     return qs.order_by("-rank")[:RESULTS_PER_TYPE]
 
 
-# ---------------------------------------------------------------------------
-# API View
-# ---------------------------------------------------------------------------
 class SearchRateThrottle(UserRateThrottle):
     rate = '30/min'
 
@@ -118,7 +102,6 @@ class GlobalSearchView(APIView):
 
         results = {}
 
-        # --- Users ---
         if search_type in ("all", "users"):
             user_qs = (
                 UserProfile.objects
@@ -129,7 +112,6 @@ class GlobalSearchView(APIView):
             user_results = _hybrid_search(user_qs, term, ["user__username"])
             results["users"] = UserSearchResultSerializer(user_results, many=True).data
 
-        # --- Exercises ---
         if search_type in ("all", "exercises"):
             exercise_qs = (
                 Exercise.objects
@@ -141,7 +123,6 @@ class GlobalSearchView(APIView):
                 exercise_results, many=True
             ).data
 
-        # --- Workouts ---
         if search_type in ("all", "workouts"):
             workout_qs = (
                 Workout.objects
