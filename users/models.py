@@ -1,6 +1,7 @@
 
 
 import uuid
+import pathlib
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.contrib.postgres.indexes import GinIndex
@@ -46,10 +47,15 @@ class User(AbstractUser):
     def __str__(self) -> str:
         return self.username
 
+ALLOWED_AVATAR_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
+
 def avatar_upload_path(instance, filename: str) -> str:
-   
-        ext = filename.rsplit(".", 1)[-1].lower()
+    ext = pathlib.Path(filename).suffix.lower().strip(".")
+    if ext not in ALLOWED_AVATAR_EXTENSIONS:
+        raise ValueError("Please upload a file that is allowed")
+    else:
         return f"avatars/user_{instance.user_id}/avatar.{ext}"
+        
 
 class UserProfile(models.Model):
    
@@ -68,8 +74,8 @@ class UserProfile(models.Model):
         blank=True,
     )
     is_public = models.BooleanField(default=True)
-    followers_count = models.PositiveIntegerField(default=0)
-    following_count = models.PositiveIntegerField(default=0)
+    followers_count = models.PositiveIntegerField(default=0,editable=False)
+    following_count = models.PositiveIntegerField(default=0,editable=False)
     bio = models.CharField(max_length=2000, blank=True, default="")
     height = models.PositiveSmallIntegerField(
         null=True,

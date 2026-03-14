@@ -3,7 +3,7 @@ from rest_framework.viewsets import ModelViewSet
 from rest_framework import permissions
 from .models import Exercise , Workout
 from .serializers import ExerciseSerializer , WorkoutSerializer , WorkoutWriteSerializer
-from common.permissions import IsOwner
+from common.permissions import IsOwnerOrReadOnly
 
 class ExerciseViewSet(ModelViewSet):
     queryset = Exercise.objects.all()
@@ -15,7 +15,7 @@ class ExerciseViewSet(ModelViewSet):
         return [permissions.AllowAny()]
 
 class WorkoutViewSet(ModelViewSet):
-    permission_classes = [permissions.IsAuthenticated, IsOwner | permissions.IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrReadOnly | permissions.IsAdminUser]
 
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:

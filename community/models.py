@@ -83,9 +83,9 @@ class Post(models.Model):
     )
 
     
-    likes_count    = models.PositiveIntegerField(default=0)
-    dislikes_count = models.PositiveIntegerField(default=0)
-    comments_count = models.PositiveIntegerField(default=0)
+    likes_count    = models.PositiveIntegerField(default=0,editable=False)
+    dislikes_count = models.PositiveIntegerField(default=0,editable=False)
+    comments_count = models.PositiveIntegerField(default=0,editable=False)
    
 
     
@@ -203,8 +203,8 @@ class Comment(models.Model):
     body = models.TextField(help_text="The comment text.")
     depth = models.PositiveSmallIntegerField(default=0)
 
-    likes_count    = models.PositiveIntegerField(default=0)
-    dislikes_count = models.PositiveIntegerField(default=0)
+    likes_count    = models.PositiveIntegerField(default=0,editable=False)
+    dislikes_count = models.PositiveIntegerField(default=0,editable=False)
 
     is_deleted = models.BooleanField(default=False, db_index=True)
 
@@ -242,6 +242,10 @@ class Comment(models.Model):
         self.depth = intended_depth
         
     def save(self, *args, **kwargs):
+        if self.parent:
+            self.depth = self.parent.depth + 1
+            if self.depth > 3:
+                raise ValidationError("Comment depth cant exceed 3")
         super().save(*args, **kwargs)
         
     def __str__(self) -> str:

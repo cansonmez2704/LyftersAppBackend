@@ -2,16 +2,15 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Q, F
 from django.shortcuts import get_object_or_404
-from rest_framework.exceptions import PermissionDenied , ValidationError
-from rest_framework import generics, status, permissions
+from rest_framework.exceptions import PermissionDenied 
+from rest_framework import generics, status
 from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken, OutstandingToken, BlacklistedToken, TokenError
 from .models import UserProfile, UserFollower
-from .serializers import UserRegisterSerializer, FullUserProfileSerializer, MiniUserProfileSerializer, ChangePasswordSerializer, UserFollowerSerializer
-from common.permissions import IsOwner
+from .serializers import UserRegisterSerializer, FullUserProfileSerializer, MiniUserProfileSerializer, ChangePasswordSerializer
 from common.pagination import FeedCursorPagination
 from common.follow import toggle_follow
 

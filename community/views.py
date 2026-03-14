@@ -8,7 +8,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework import permissions
 from rest_framework.response import Response
 
-from common.permissions import IsOwner
+from common.permissions import IsOwnerOrReadOnly
 from common.reactions import toggle_reaction
 
 
@@ -46,8 +46,10 @@ class PostViewSet(ModelViewSet):
            | Q(visibility=Post.Visibility.FOLLOWERS,
             author__incoming_followers__from_user=self.request.user,
             author__incoming_followers__status=UserFollower.FollowStatus.ACCEPTED,
-    )
-)
+        )
+       ) 
+     else:
+        base_queryset = base_queryset.filter(visibility=Post.Visibility.PUBLIC)
 
      if self.action == 'retrieve':
         return base_queryset.prefetch_related(
@@ -64,7 +66,7 @@ class PostViewSet(ModelViewSet):
     
     def get_permissions(self):
         if self.action in ['update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), IsOwner()]
+            return [permissions.IsAuthenticated(), IsOwnerOrReadOnly()]
         return [permissions.IsAuthenticated()]
         
     def perform_create(self, serializer):
@@ -83,7 +85,7 @@ class PostViewSet(ModelViewSet):
         parent_field_name="post",
         user=request.user,
         reaction_type=request.data.get("reaction_type"),
-        valid_choices=[PostReaction.LIKE, PostReaction.DISLIKE],
+        valid_choices=[ReactionType.LIKE, ReactionType.DISLIKE],
      )
      
     
@@ -111,7 +113,7 @@ class CommentViewSet(ModelViewSet):
 
     def get_permissions(self):
         if self.action in ['update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), IsOwner() | permissions.IsAdminUser()]
+            return [permissions.IsAuthenticated(), IsOwnerOrReadOnly() | permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]  
 
     def get_queryset(self):
@@ -182,7 +184,7 @@ class FeedView(ListAPIView):
 
      return (
         Post.objects.filter(
-            author_id__in=following_ids,
+            Q( author_id__in=following_ids) | Q(author=self.request.user),
             is_deleted=False,
         )
         .select_related( "author__profile")
