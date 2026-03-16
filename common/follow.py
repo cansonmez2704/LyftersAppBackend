@@ -13,7 +13,7 @@ def toggle_follow(*, follow_model, from_user, target_profile):
         profile_model = target_profile.__class__
 
         if from_user.pk == target_profile.user_id:
-            raise ValidationError("You cannot follow yourself.")
+            return Response({"status": "Can't follow yourself"}, status=status.HTTP_400_BAD_REQUEST)
 
         from_user_profile_pk = (
             profile_model.objects

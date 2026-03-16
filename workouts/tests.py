@@ -26,18 +26,12 @@ class ExerciseViewSetTests(APITestCase):
             email="admin@admin.com",
             password="supersecret"
         )
-
-        # We create a Squat
         self.exercise = Exercise.objects.create(
             name="Squat",
             slug="squat",
             exercise_type=Exercise.ExerciseType.WEIGHTLIFTING
         )
-        
-        # BUG 1 FIX: Renamed to self.detail_url
         self.detail_url = reverse("exercises-detail", kwargs={"pk": self.exercise.pk})
-        
-        # BUG 2 FIX: Changed to Deadlift so it doesn't trigger unique=True error
         self.create_payload = {
             "name": "Deadlift",
             "slug": "deadlift-barbell",
@@ -85,11 +79,9 @@ class WorkoutViewSetTests(APITestCase):
             password="securepassword123"
         )
 
-        # 2. Create Muscle Groups
         self.chest = MuscleGroup.objects.create(name="Chest", slug="chest")
         self.triceps = MuscleGroup.objects.create(name="Triceps", slug="triceps")
 
-        # 3. Create the Exercise and add M2M relations
         self.bench_press = Exercise.objects.create(
             name="Barbell Bench Press",
             slug="barbell-bench-press",
@@ -100,7 +92,6 @@ class WorkoutViewSetTests(APITestCase):
         )
         self.bench_press.muscles.add(self.chest, self.triceps)
 
-        # 4. Create the main Workout container
         self.push_day = Workout.objects.create(
             owner=self.user,
             name="Heavy Push Day",
@@ -109,7 +100,6 @@ class WorkoutViewSetTests(APITestCase):
             estimated_duration_min=60
         )
 
-        # 5. Create the Bridge (WorkoutExercise)
         self.workout_bench = WorkoutExercise.objects.create(
             workout=self.push_day,
             exercise=self.bench_press,
@@ -117,30 +107,29 @@ class WorkoutViewSetTests(APITestCase):
             notes="Warm up shoulders first. Keep back tight."
         )
 
-        # 6. Create the Sets attached to that specific WorkoutExercise bridge
         WorkoutSet.objects.create(
-            workout_exercise=self.workout_bench, # Updated to self.
+            workout_exercise=self.workout_bench, 
             set_number=1, 
             reps=10, 
             weight=135, 
             weight_unit=WorkoutSet.WeightUnit.POUND
         )
         WorkoutSet.objects.create(
-            workout_exercise=self.workout_bench, # Updated to self.
+            workout_exercise=self.workout_bench, 
             set_number=2, 
             reps=8, 
             weight=185, 
             weight_unit=WorkoutSet.WeightUnit.POUND
         )
         WorkoutSet.objects.create(
-            workout_exercise=self.workout_bench, # Updated to self.
+            workout_exercise=self.workout_bench, 
             set_number=3, 
             reps=5, 
             weight=225, 
             weight_unit=WorkoutSet.WeightUnit.POUND
         )
         
-        # Updated to self.push_day
+     
         self.workouts_detail_url = reverse("workouts-detail", kwargs={"pk": self.push_day.pk})
 
     def test_unauthenticate_user_read_rejection(self):
@@ -163,7 +152,7 @@ class WorkoutViewSetTests(APITestCase):
             "name": "Admin's Secret Workout",
             "description": "Only the admin can do this.",
             "visibility": "public",
-            "workout_exercises": [] # <-- The missing field!
+            "workout_exercises": [] 
         }
         create_workout = self.client.post(self.workouts_list_url,create_payload,format="json")
         self.assertEqual(create_workout.status_code,status.HTTP_201_CREATED)
@@ -234,17 +223,15 @@ class WorkoutViewSetTests(APITestCase):
 
 
     def test_create_workout_with_nested_data(self):
-        # 1. ARRANGE: Log in as Arnold
         self.client.force_authenticate(user=self.user)
         
-        # Build the massive nested payload exactly as the frontend would send it
         payload = {
             "name": "Full Stack Workout",
             "description": "Testing the nested serializer via the API",
             "visibility": "private",
             "workout_exercises": [
                 {
-                    # Use the exercise ID from your setUp method
+              
                     "exercise": self.bench_press.id, 
                     "order": 0,
                     "notes": "Testing nested creation",
@@ -256,14 +243,10 @@ class WorkoutViewSetTests(APITestCase):
             ]
         }
         
-        # 2. ACT: Send it to the POST endpoint. 
-        # CRITICAL: You must use format='json' so DRF parses the nested dictionaries correctly!
         response = self.client.post(self.workouts_list_url, payload, format='json')
-        
-        # 3. ASSERT: The View allowed it and the Serializer processed it
+    
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        
-        # 4. ASSERT: Prove the database actually saved the nested relationships
+ 
         new_workout = Workout.objects.get(name="Full Stack Workout")
         self.assertEqual(new_workout.workout_exercises.count(), 1)
         self.assertEqual(new_workout.workout_exercises.first().sets.count(), 2)
