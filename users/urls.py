@@ -12,7 +12,7 @@ urlpatterns = [
     path("token/refresh/", TokenRefreshView.as_view(), name='token_refresh'),
     path("token/verify/", TokenVerifyView.as_view(), name='token_verify'),
     path("sign-up/", RegisterView.as_view(), name="sign-up"),
-    path("log-out/", LogoutView.as_view(), name="log-out"),
+    path("log-out/", LogoutView.as_view(), name="logout"),
     path("change-password/", ChangePasswordView.as_view(), name="change-password"),
 
     # Profile
