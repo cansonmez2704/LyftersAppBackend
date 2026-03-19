@@ -1,10 +1,11 @@
+import uuid
 from django.urls import reverse
 from rest_framework.test import APITestCase
 from rest_framework import status
 from django.contrib.auth import get_user_model
-from users.models import User,UserFollower,UserProfile
+from users.models import UserFollower,UserProfile
 
-
+User = get_user_model()
 class FollowUserViewTest(APITestCase):
 
     def setUp(self):
@@ -206,6 +207,98 @@ class RejectViewTest(APITestCase):
         response = self.client.post(self.reject_url)
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+class ProfileNetworkListViewTests(APITestCase):
+
+    def setUp(self):
+        self.from_user = User.objects.create_user(username="Arnold", email="arnold@gmail.com", password="password123")
+        self.target = User.objects.create_user(username="Phil", email="phil@gmail.com", password="password123")
+
+        self.profile_from_user, _ = UserProfile.objects.get_or_create(user=self.from_user)
+        self.profile_target, _ = UserProfile.objects.get_or_create(user=self.target)
+
+        self.network_urls = [
+            reverse("following-list", kwargs={"uuid": self.target.uuid}),
+            reverse("follower-list", kwargs={"uuid": self.target.uuid})
+        ]
+
+
+    def test_unauth_user_cant_view(self):
+        self.profile_target.is_public = True
+        self.profile_target.save()
+
+        for url in self.network_urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_from_user_cannot_view_private_lists(self):
+        self.profile_target.is_public = False
+        self.profile_target.save()
+
+        self.client.force_authenticate(user=self.from_user)
+
+        for url in self.network_urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+                self.assertEqual(response.data["detail"], "This profile is private.")
+
+    def test_account_owner_can_view_own_lists(self):
+        self.profile_target.is_public = False
+        self.profile_target.save()
+
+        self.client.force_authenticate(user=self.target)
+
+        for url in self.network_urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_accepted_follower_can_view_private_lists(self):
+        self.profile_target.is_public = False
+        self.profile_target.save()
+
+        UserFollower.objects.create(
+            from_user=self.from_user,
+            to_user=self.target,
+            status=UserFollower.FollowStatus.ACCEPTED
+        )
+
+        self.client.force_authenticate(user=self.from_user)
+
+        for url in self.network_urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
+    def test_network_lists_return_correct_data(self):
+       
+        UserFollower.objects.create(
+            from_user=self.from_user,
+            to_user=self.target,
+            status=UserFollower.FollowStatus.ACCEPTED
+        )
+
+       
+        self.client.force_authenticate(user=self.target)
+
+        
+        follower_url = reverse("follower-list", kwargs={"uuid": self.target.uuid})
+        follower_response = self.client.get(follower_url)
+        self.assertEqual(follower_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(follower_response.data["results"]), 1)
+        self.assertEqual(follower_response.data["results"][0]["user"]["username"], "Arnold")
+
+        following_url = reverse("following-list", kwargs={"uuid": self.from_user.uuid})
+        self.client.force_authenticate(user=self.from_user) 
+        following_response = self.client.get(following_url)
+        
+        self.assertEqual(following_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(following_response.data["results"]), 1)
+        self.assertEqual(following_response.data["results"][0]["user"]["username"], "Phil")
+
 
 
         
