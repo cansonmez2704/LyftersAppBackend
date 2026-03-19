@@ -28,6 +28,7 @@ from common.pagination import FeedCursorPagination, CommentLimitOffsetPagination
 class PostViewSet(ModelViewSet):
    
     pagination_class = FeedCursorPagination
+    lookup_field = 'uuid'
 
     def get_serializer_class(self):
       if self.action == 'retrieve':
@@ -41,7 +42,10 @@ class PostViewSet(ModelViewSet):
     def get_queryset(self):
      base_queryset = Post.objects.filter(is_deleted=False).select_related("author__profile")
 
-     if not self.request.user.is_staff and self.request.user.is_authenticated:
+     if self.request.user.is_staff:
+        return base_queryset
+
+     elif self.request.user.is_authenticated:
         base_queryset = base_queryset.filter(
            Q(author=self.request.user)
            | Q(visibility=Post.Visibility.PUBLIC)
@@ -79,7 +83,7 @@ class PostViewSet(ModelViewSet):
         instance.save(update_fields=['is_deleted'])
     
     @action(detail=True, methods=["POST"],url_path="react")
-    def react_to_posts(self, request, pk=None):
+    def react_to_posts(self, request, uuid=None):
      post = self.get_object()
      return toggle_reaction(
         reaction_model=PostReaction,
@@ -92,7 +96,7 @@ class PostViewSet(ModelViewSet):
      
     
     @action(detail=True,methods=["GET"])
-    def reactions(self,request,pk=None):
+    def reactions(self,request,uuid=None):
        post = self.get_object()
        reaction_qs = post.reactions.select_related("user__profile").all() 
        reaction_type = request.query_params.get('type')

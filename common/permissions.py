@@ -6,11 +6,11 @@ class IsOwnerOrReadOnly(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return True
         elif hasattr(obj,"owner"):
-            return obj.owner == request.user
+            return obj.owner == request.user or request.user.is_staff
         elif hasattr(obj,"author"):
-            return obj.author == request.user
+            return obj.author == request.user or request.user.is_staff
         elif hasattr(obj,"user"):
-            return obj.user == request.user
+            return obj.user == request.user or request.user.is_staff
         else:
             return False
         
