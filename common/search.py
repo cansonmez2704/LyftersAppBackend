@@ -85,10 +85,18 @@ class GlobalSearchView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        MAX_QUERY_LENGTH = 200
+
         term = request.query_params.get("q", "").strip()
         if len(term) < 2:
             return Response(
                 {"error": "Search query must be at least 2 characters."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(term) > MAX_QUERY_LENGTH:
+            return Response(
+                {"error": f"Search query must not exceed {MAX_QUERY_LENGTH} characters."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
