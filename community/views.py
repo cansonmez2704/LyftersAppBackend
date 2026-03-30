@@ -6,11 +6,11 @@ from django.db.models.functions import Greatest
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.generics import ListAPIView
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
 from rest_framework import permissions
 from rest_framework.response import Response
 
-from common.permissions import IsOwnerOrReadOnly
+from common.permissions import IsOwnerOrReadOnly, IsAuthorOnly, IsOwnerOrAdmin
 from common.reactions import toggle_reaction
 
 
@@ -118,15 +118,22 @@ class CommentViewSet(ModelViewSet):
     pagination_class = CommentLimitOffsetPagination
 
     def get_permissions(self):
-        if self.action in ['update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), IsOwnerOrReadOnly() | permissions.IsAdminUser()]
-        return [permissions.IsAuthenticated()]  
+        if self.action in ['update', 'partial_update']:
+            return [permissions.IsAuthenticated(), IsAuthorOnly()]
+        if self.action == 'destroy':
+            return [permissions.IsAuthenticated(), IsOwnerOrAdmin()]
+        return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         queryset = Comment.objects.filter(is_deleted=False)
+        if self.request.user.is_staff or self.request.user.is_superuser:
+            return queryset.select_related("post", "author__profile").prefetch_related("reactions__user__profile")
+        
+
         queryset = queryset.filter(
                 Q(post__visibility=Post.Visibility.PUBLIC) | Q(post__author=self.request.user)
                 | Q(post__visibility=Post.Visibility.FOLLOWERS, post__author__incoming_followers__from_user=self.request.user, post__author__incoming_followers__status=UserFollower.FollowStatus.ACCEPTED)
+               
             )
         post_uuid = self.request.query_params.get('post')
         if post_uuid:
@@ -135,10 +142,24 @@ class CommentViewSet(ModelViewSet):
 
     def perform_create(self, serializer):
         post = serializer.validated_data.get('post')
-        if post.visibility == 'private' and post.author != self.request.user:
+        user = self.request.user
+
+        if post.is_deleted:
+            raise DRFValidationError("Cannot comment on a deleted post.")
+
+        if post.visibility == Post.Visibility.PRIVATE and post.author != user:
             raise PermissionDenied("You cannot comment on this private post.")
 
-        serializer.save(author=self.request.user)
+        if post.visibility == Post.Visibility.FOLLOWERS and post.author != user:
+            is_follower = UserFollower.objects.filter(
+                from_user=user,
+                to_user=post.author,
+                status=UserFollower.FollowStatus.ACCEPTED,
+            ).exists()
+            if not is_follower:
+                raise PermissionDenied("You must follow this user to comment on their posts.")
+
+        serializer.save(author=user)
         Post.objects.filter(uuid=post.uuid).update(comments_count=F("comments_count") + 1)
         
     def perform_destroy(self, instance):
@@ -146,8 +167,7 @@ class CommentViewSet(ModelViewSet):
             return
 
         with transaction.atomic():
-            # "Promotion" Logic: If this is a parent, make its replies become parent comments
-            # instead of deleting them. This keeps the post comment-count accurate.
+
             Comment.objects.filter(parent=instance).update(parent=None, depth=0)
 
             instance.is_deleted = True

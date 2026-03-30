@@ -232,7 +232,7 @@ class Comment(models.Model):
             raise ValidationError("Replies must belong to the same post as the parent comment.")
         if self.parent and self.parent.is_deleted:
             raise ValidationError("Cannot reply to a deleted comment.")
-        if not self.body:
+        if not self.body or not self.body.strip():
             raise ValidationError("Comment body cannot be empty.")
             
         MAX_COMMENT_DEPTH = 3 
