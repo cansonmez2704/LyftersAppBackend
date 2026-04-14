@@ -1,5 +1,6 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
+from rest_framework.throttling import ScopedRateThrottle
 from .views import (
     RegisterView, MyProfileView, UserProfileView,
     LogoutView, ChangePasswordView,
@@ -7,10 +8,21 @@ from .views import (
     FollowerListView, FollowingListView,
 )
 
+
+class ThrottledTokenRefreshView(TokenRefreshView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'strict_auth'
+
+
+class ThrottledTokenVerifyView(TokenVerifyView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'strict_auth'
+
+
 urlpatterns = [
     # Auth
-    path("token/refresh/", TokenRefreshView.as_view(), name='token_refresh'),
-    path("token/verify/", TokenVerifyView.as_view(), name='token_verify'),
+    path("token/refresh/", ThrottledTokenRefreshView.as_view(), name='token_refresh'),
+    path("token/verify/", ThrottledTokenVerifyView.as_view(), name='token_verify'),
     path("sign-up/", RegisterView.as_view(), name="sign-up"),
     path("log-out/", LogoutView.as_view(), name="logout"),
     path("change-password/", ChangePasswordView.as_view(), name="change-password"),

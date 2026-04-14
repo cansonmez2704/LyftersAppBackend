@@ -3,6 +3,7 @@ from .models import UserProfile , User , UserFollower
 from rest_framework.exceptions import ValidationError
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from core.settings import MAX_AVATAR_UPLOAD_SIZE , MAX_IMAGE_UPLOAD_SIZE , MAX_VIDEO_UPLOAD_SIZE
 
 
 class ChangePasswordSerializer(serializers.Serializer):
@@ -111,4 +112,19 @@ class FullUserProfileSerializer(serializers.ModelSerializer):
             .order_by("-created_at")[:10]                   
         )
         return WorkoutSerializer(workouts, many=True).data  
+    
+    
+    def validate_avatar(self, value):
+        if value:
+            
+            if value.size > MAX_AVATAR_UPLOAD_SIZE:
+           
+                actual_size_mb = value.size / (1024 * 1024)
+                limit_mb = MAX_AVATAR_UPLOAD_SIZE / (1024 * 1024)
+                
+                raise serializers.ValidationError(
+                    f"Avatar file size must be under {limit_mb:.0f} MB. Your file is {actual_size_mb:.2f} MB."
+                )
+                
+        return value
 

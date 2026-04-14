@@ -22,7 +22,7 @@ load_dotenv(BASE_DIR/".env")
 SECRET_KEY = os.getenv("SECRET_KEY")
 DEBUG = os.getenv("DEBUG") == "True"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
 
 
 INSTALLED_APPS = [
@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "corsheaders",
     "rest_framework",
+    "storages",
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     "common",
@@ -67,15 +68,16 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
 
-    'DEFAULT_THROTTLE_CLASSES': [
+   'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',   
         'rest_framework.throttling.UserRateThrottle',   
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/day',        
-        'user': '2000/day',       
+        'anon': '100/hour',        
+        'user': '1000/hour',       
         'reaction_spam': '20/min', 
-        "search": "30/min"
+        'search': '30/min',
+        'strict_auth': '5/min', 
     }
 }
 
@@ -123,6 +125,7 @@ DATABASES = {
         "PASSWORD": os.getenv("DB_PASSWORD"),
         "HOST": "localhost",
         "PORT": "5432",
+        "DISABLE_SERVER_SIDE_CURSORS": True,
     }
 }
 
@@ -189,13 +192,102 @@ CORS_ALLOWED_ORIGINS = [
     "https://gymhub-frontend.vercel.app", 
 ]
 
-IS_PRODUCTION = os.getenv('IS_PRODUCTION', 'False') == 'True'
+IS_IN_PRODUCTION = os.environ.get('USE_SECURE_PROXY', 'False') == 'True'
+MAX_IMAGE_UPLOAD_SIZE = 10 * 1024 * 1024  
+MAX_VIDEO_UPLOAD_SIZE = 50 * 1024 * 1024
+MAX_AVATAR_UPLOAD_SIZE = 5 * 1024 * 1024
 
-if IS_PRODUCTION:
+CORS_ALLOW_ALL_ORIGINS = False
+
+# --- CELERY SETTINGS ---
+# Use the same Redis URL you already have in your .env
+CELERY_BROKER_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+# Optimization: how many tasks should a worker take at once?
+CELERY_WORKER_CONCURRENCY = 4
+# Don't let a task run forever
+CELERY_TASK_SOFT_TIME_LIMIT = 300 
+# Accept content types (json is safest)
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+
+
+# This checks your .env for USE_SECURE_PROXY=True
+IS_IN_PRODUCTION = os.environ.get('USE_SECURE_PROXY', 'False') == 'True'
+
+if IS_IN_PRODUCTION:
+    # 1. AWS S3 Settings
+    AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME')
+    
+    # S3 Specific Behaviors
+    AWS_S3_FILE_OVERWRITE = False
+    AWS_DEFAULT_ACL = 'public-read'
+    AWS_S3_VERIFY = True
+
+    # 2. Static & Media Locations
+    # This creates /static/ and /media/ folders inside your S3 bucket
+    STATIC_LOCATION = 'static'
+    STATIC_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/{STATIC_LOCATION}/'
+    
+    MEDIA_LOCATION = 'media'
+    MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/{MEDIA_LOCATION}/'
+
+    # 3. Storage Backends (Django 4.2+)
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+            "OPTIONS": {
+                "location": MEDIA_LOCATION,
+            },
+        },
+        "staticfiles": {
+            "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+            "OPTIONS": {
+                "location": STATIC_LOCATION,
+            },
+        },
+    }
+
+    # 4. Production Security Headers
+    CORS_ALLOWED_ORIGINS = ["https://gymhub-frontend.vercel.app"]
+    CORS_ALLOW_CREDENTIALS = True 
+    
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = True
+    SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+    
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+    
     SECURE_CONTENT_TYPE_NOSNIFF = True
-    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_SECONDS = 31536000  # 1 Year
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+
+else:
+    # 1. Local Storage (Saves to your local 'media' and 'static' folders)
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+
+    # 2. Local URLs
+    STATIC_URL = "/static/"
+    MEDIA_URL = "/media/"
+
+    # 3. Local Development Security (Relaxed)
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+    ]
+    CORS_ALLOW_CREDENTIALS = True

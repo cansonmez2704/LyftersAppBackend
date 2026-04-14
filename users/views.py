@@ -8,6 +8,7 @@ from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken, OutstandingToken, BlacklistedToken, TokenError
 from .models import UserProfile, UserFollower
 from .serializers import UserRegisterSerializer, FullUserProfileSerializer, MiniUserProfileSerializer, ChangePasswordSerializer
@@ -19,6 +20,8 @@ class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = UserRegisterSerializer
     permission_classes = [AllowAny,]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'strict_auth'
 
     def create (self,request,*args,**kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -38,6 +41,8 @@ class RegisterView(generics.CreateAPIView):
 
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'strict_auth'
 
     def post(self, request):
         try:
@@ -62,6 +67,8 @@ class LogoutView(APIView):
 
 class ChangePasswordView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'strict_auth'
 
     def put(self, request, *args, **kwargs):
         serializer = ChangePasswordSerializer(

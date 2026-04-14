@@ -1,9 +1,10 @@
+import uuid, os 
 from django.db import models
 from django.conf import settings
 from django.utils.text import slugify
 from django.core.validators import FileExtensionValidator
 from django.core.exceptions import ValidationError
-import uuid, os 
+from common.validators import validate_media_size, validate_real_content_type
 
 
 
@@ -134,9 +135,13 @@ class PostMedia(models.Model):
     
     file       = models.FileField(
         upload_to=post_image_upload_path,
-        validators=[FileExtensionValidator(
+        validators=[
+            FileExtensionValidator(
             ['jpg', 'jpeg', 'png', 'gif', 'mp4', 'avi', 'mov', 'mkv', 'webm']
-        )]
+        ),
+        validate_media_size, 
+        validate_real_content_type
+        ]
     )
     
     order      = models.PositiveSmallIntegerField(default=0, help_text="Display order within the post.")
