@@ -81,10 +81,9 @@ class ChangePasswordView(APIView):
             user.set_password(serializer.validated_data['new_password'])
             user.save()
 
-            active_tokens = OutstandingToken.objects.filter(user=user)
-            
-            for token in active_tokens:
-                BlacklistedToken.objects.get_or_create(token=token)    
+            # Blacklist all tokens asynchronously
+            from users.tasks import bulk_blacklist_tokens
+            bulk_blacklist_tokens.delay(user.id)
             
             return Response(
                 {"message": "Password updated successfully."}, 

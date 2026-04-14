@@ -234,46 +234,29 @@ class WorkoutSet(models.Model):
 
 
 # ---------------------------------------------------------------------------
-# Search-vector signals
+# Search-vector signals (dispatched to Celery)
 # ---------------------------------------------------------------------------
-
-def _update_exercise_search_vector(exercise_pk):
-    """Rebuild search vector for an Exercise."""
-    Exercise.objects.filter(pk=exercise_pk).update(
-        search_vector=(
-            SearchVector("name", weight="A")
-            + SearchVector("description", weight="B")
-        )
-    )
-
-
-def _update_workout_search_vector(workout_pk):
-    """Rebuild search vector for a Workout."""
-    Workout.objects.filter(pk=workout_pk).update(
-        search_vector=(
-            SearchVector("name", weight="A")
-            + SearchVector("description", weight="B")
-        )
-    )
-
 
 @receiver(post_save, sender=Exercise)
 def update_exercise_search_vector(sender, instance, **kwargs):
+    from workouts.tasks import rebuild_exercise_search_vector
     transaction.on_commit(
-        lambda: _update_exercise_search_vector(instance.pk)
+        lambda: rebuild_exercise_search_vector.delay(instance.pk)
     )
 
 
 @receiver(m2m_changed, sender=Exercise.muscles.through)
 def update_exercise_search_vector_on_m2m(sender, instance, **kwargs):
     """Also rebuild when muscles are added/removed."""
+    from workouts.tasks import rebuild_exercise_search_vector
     transaction.on_commit(
-        lambda: _update_exercise_search_vector(instance.pk)
+        lambda: rebuild_exercise_search_vector.delay(instance.pk)
     )
 
 
 @receiver(post_save, sender=Workout)
 def update_workout_search_vector(sender, instance, **kwargs):
+    from workouts.tasks import rebuild_workout_search_vector
     transaction.on_commit(
-        lambda: _update_workout_search_vector(instance.pk)
+        lambda: rebuild_workout_search_vector.delay(instance.pk)
     )

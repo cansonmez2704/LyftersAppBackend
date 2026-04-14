@@ -129,36 +129,19 @@ def create_user_profile(sender, instance, created, **kwargs):
             lambda: UserProfile.objects.get_or_create(user=instance)
         )
     else:
-        # When username changes, update the profile search vector
+        # When username changes, rebuild search vector via Celery
+        from users.tasks import rebuild_profile_search_vector
         transaction.on_commit(
-            lambda: _update_profile_search_vector(instance.pk)
+            lambda: rebuild_profile_search_vector.delay(instance.pk)
         )
-
-
-def _update_profile_search_vector(user_pk):
-    """Rebuild the search vector for a user's profile.
-    
-    Uses raw SQL because SearchVector with joined fields (user__username)
-    cannot be used in .update() — Django raises FieldError.
-    """
-    from django.db import connection
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            UPDATE users_userprofile
-            SET search_vector =
-                setweight(to_tsvector('english', COALESCE(u.username, '')), 'A') ||
-                setweight(to_tsvector('english', COALESCE(users_userprofile.bio, '')), 'B')
-            FROM users_user u
-            WHERE users_userprofile.user_id = u.id
-              AND users_userprofile.user_id = %s
-        """, [user_pk])
 
 
 @receiver(post_save, sender=UserProfile)
 def update_profile_search_vector(sender, instance, **kwargs):
     """Update search vector whenever the profile itself is saved."""
+    from users.tasks import rebuild_profile_search_vector
     transaction.on_commit(
-        lambda: _update_profile_search_vector(instance.user_id)
+        lambda: rebuild_profile_search_vector.delay(instance.user_id)
     )
 
 class UserFollower(models.Model):

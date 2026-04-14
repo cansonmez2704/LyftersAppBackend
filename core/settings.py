@@ -25,6 +25,7 @@ DEBUG = os.getenv("DEBUG") == "True"
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
 
 
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -34,17 +35,54 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django.contrib.postgres",
     "django_extensions",
+    "django.contrib.sites", # Required by allauth
+    
+    # --- Social Auth / OAuth ---
+    "allauth",
+    "allauth.account",
+    "allauth.socialaccount",
+    "allauth.socialaccount.providers.google", # Google
+    # "allauth.socialaccount.providers.apple", # (Commented out until you get your domain)
+    
+    "dj_rest_auth",
+    "dj_rest_auth.registration",
+    
+    # --- API Tools ---
     "drf_spectacular",
     "corsheaders",
     "rest_framework",
+    "rest_framework.authtoken", # <-- ADD THIS (Needed for dj-rest-auth)
     "storages",
-    'rest_framework_simplejwt',
-    'rest_framework_simplejwt.token_blacklist',
+    "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
+    
+    # --- Background Workers & Scheduling ---
+    "django_celery_beat", # <-- ADD THIS (For your periodic tasks)
+
+    # --- Local Apps ---
     "common",
     "workouts",
     "community",
     "users",
 ]
+
+SITE_ID = 1
+
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'SCOPE': [
+            'profile',
+            'email',
+        ],
+        'AUTH_PARAMS': {
+            'access_type': 'online',
+        },
+        'OAUTH_PKCE_ENABLED': True, 
+    }
+}
+
+LOGIN_REDIRECT_URL = '/admin/' 
+LOGOUT_REDIRECT_URL = '/'
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -55,8 +93,15 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    
+    # --- ADD THIS LINE ---
+    "allauth.account.middleware.AccountMiddleware",
 ]
 
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',
+]
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -212,6 +257,24 @@ CELERY_TASK_SOFT_TIME_LIMIT = 300
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
+
+# --- CELERY BEAT SCHEDULE ---
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'purge-deleted-posts': {
+        'task': 'community.tasks.purge_soft_deleted_posts',
+        'schedule': crontab(hour=3, minute=0),
+    },
+    'purge-deleted-comments': {
+        'task': 'community.tasks.purge_soft_deleted_comments',
+        'schedule': crontab(hour=3, minute=15),
+    },
+    'reconcile-counters': {
+        'task': 'common.tasks.reconcile_counters',
+        'schedule': crontab(hour='*/6', minute=30),
+    },
+}
 
 
 # This checks your .env for USE_SECURE_PROXY=True

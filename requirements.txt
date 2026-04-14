@@ -34,3 +34,6 @@ redis>=5.0.0
 
 # Magic (requires system libmagic: brew install libmagic on macOS)
 python-magic>=0.4.27
+
+# Task Queue
+celery[redis]>=5.4.0
