@@ -7,6 +7,7 @@ from django.contrib.auth.models import AbstractUser, UserManager
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector, SearchVectorField
 from django.core.validators import MaxValueValidator, MinValueValidator
+from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import Q , F
 from django.db.models.signals import post_save
@@ -52,9 +53,10 @@ ALLOWED_AVATAR_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 def avatar_upload_path(instance, filename: str) -> str:
     ext = pathlib.Path(filename).suffix.lower().strip(".")
     if ext not in ALLOWED_AVATAR_EXTENSIONS:
-        raise ValueError("Please upload a file that is allowed")
-    else:
-        return f"avatars/user_{instance.user_id}/avatar.{ext}"
+        raise ValidationError(
+            f"Invalid file type '.{ext}'. Allowed: {', '.join(ALLOWED_AVATAR_EXTENSIONS)}"
+        )
+    return f"avatars/user_{instance.user_id}/avatar.{ext}"
         
 
 class UserProfile(models.Model):
@@ -118,18 +120,19 @@ class UserProfile(models.Model):
             return self.avatar.url
         return "/static/images/default-avatar.png"
    
-    # NOTE: Avatar resizing should be handled asynchronously.
-    # In production, enqueue a Celery task in the serializer's save
-    # to resize after upload, rather than blocking the request here.
+SEARCH_RELEVANT_USER_FIELDS = frozenset({"username"})
 
 @receiver(post_save, sender=settings.AUTH_USER_MODEL)
-def create_user_profile(sender, instance, created, **kwargs):
+def create_user_profile(sender, instance, created, update_fields, **kwargs):
     if created:
         transaction.on_commit(
             lambda: UserProfile.objects.get_or_create(user=instance)
         )
-    else:
-        # When username changes, rebuild search vector via Celery
+        return
+
+    changed = set(update_fields or [])
+    
+    if not update_fields or changed & SEARCH_RELEVANT_USER_FIELDS:
         from users.tasks import rebuild_profile_search_vector
         transaction.on_commit(
             lambda: rebuild_profile_search_vector.delay(instance.pk)

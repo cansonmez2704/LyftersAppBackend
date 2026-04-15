@@ -6,11 +6,12 @@ from django.db.models.functions import Greatest
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.generics import ListAPIView
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
 from rest_framework import permissions
 from rest_framework.response import Response
 
-from common.permissions import IsOwnerOrReadOnly, IsAuthorOnly, IsOwnerOrAdmin
+from core.throttles import ReactionSpamThrottle
+
+from common.permissions import IsOwnerOrReadOnly, IsAuthorOnly, IsOwnerOrAdmin, CanCommentOnPost
 from common.reactions import toggle_reaction
 
 
@@ -82,7 +83,7 @@ class PostViewSet(ModelViewSet):
         instance.is_deleted = True
         instance.save(update_fields=['is_deleted'])
     
-    @action(detail=True, methods=["POST"],url_path="react")
+    @action(detail=True, methods=["POST"], url_path="react", throttle_classes=[ReactionSpamThrottle])
     def react_to_posts(self, request, uuid=None):
      post = self.get_object()
      return toggle_reaction(
@@ -122,6 +123,8 @@ class CommentViewSet(ModelViewSet):
             return [permissions.IsAuthenticated(), IsAuthorOnly()]
         if self.action == 'destroy':
             return [permissions.IsAuthenticated(), IsOwnerOrAdmin()]
+        if self.action == 'create':
+            return [permissions.IsAuthenticated(), CanCommentOnPost()]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
@@ -142,24 +145,8 @@ class CommentViewSet(ModelViewSet):
 
     def perform_create(self, serializer):
         post = serializer.validated_data.get('post')
-        user = self.request.user
-
-        if post.is_deleted:
-            raise DRFValidationError("Cannot comment on a deleted post.")
-
-        if post.visibility == Post.Visibility.PRIVATE and post.author != user:
-            raise PermissionDenied("You cannot comment on this private post.")
-
-        if post.visibility == Post.Visibility.FOLLOWERS and post.author != user:
-            is_follower = UserFollower.objects.filter(
-                from_user=user,
-                to_user=post.author,
-                status=UserFollower.FollowStatus.ACCEPTED,
-            ).exists()
-            if not is_follower:
-                raise PermissionDenied("You must follow this user to comment on their posts.")
-
-        serializer.save(author=user)
+        self.check_object_permissions(self.request, post)
+        serializer.save(author=self.request.user)
         Post.objects.filter(uuid=post.uuid).update(comments_count=F("comments_count") + 1)
         
     def perform_destroy(self, instance):
@@ -177,7 +164,7 @@ class CommentViewSet(ModelViewSet):
                 comments_count=Greatest(F("comments_count") - 1, Value(0))
             )
 
-    @action(detail=True, methods=["POST"],url_path="react")
+    @action(detail=True, methods=["POST"], url_path="react", throttle_classes=[ReactionSpamThrottle])
     def react_to_comments(self, request, pk=None):
      comment = self.get_object()
      return toggle_reaction(

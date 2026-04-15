@@ -25,7 +25,7 @@ LOGOUT_REDIRECT_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 ---
 
-### [ ] CRITICAL-2: All S3 Files Are World-Readable
+### [x] CRITICAL-2: All S3 Files Are World-Readable
 **File:** `core/settings.py:292` (production block)
 
 Problem: `AWS_DEFAULT_ACL = 'public-read'` — every avatar and media upload is a public S3 URL with no auth.
@@ -46,7 +46,7 @@ AWS_S3_FILE_OVERWRITE = False
 
 ---
 
-### [ ] CRITICAL-3: Custom Throttle Scopes Are Dead Code
+### [x] CRITICAL-3: Custom Throttle Scopes Are Dead Code
 **Files:** `core/settings.py:120-126`, `community/views.py`, `users/views.py`
 
 Problem: `reaction_spam`, `search`, and `strict_auth` rates are defined in settings but no throttle class references them — zero rate limiting on reactions and auth endpoints.
@@ -73,7 +73,7 @@ class StrictAuthThrottle(AnonRateThrottle):
 
 ---
 
-### [ ] CRITICAL-4: API Docs Exposed in Production
+### [x] CRITICAL-4: API Docs Exposed in Production
 **File:** `core/urls.py:31-32`
 
 Problem: `/api/docs/` and `/api/schema/` are publicly accessible — full API structure exposed to anyone.
@@ -93,7 +93,7 @@ if settings.DEBUG:
 
 ---
 
-### [ ] CRITICAL-5: `avatar_upload_path` Raises `ValueError` → HTTP 500
+### [x] CRITICAL-5: `avatar_upload_path` Raises `ValueError` → HTTP 500
 **File:** `users/models.py:54-56`
 
 Problem: Invalid file extension raises `ValueError`, which propagates as an unhandled exception and returns HTTP 500 instead of a validation error.
@@ -118,7 +118,7 @@ def avatar_upload_path(instance, filename: str) -> str:
 
 ---
 
-### [ ] HIGH-1: `Comment.save()` Duplicates and Fights `Comment.clean()`
+### [x] HIGH-1: `Comment.save()` Duplicates and Fights `Comment.clean()`
 **File:** `community/models.py:249-254`
 
 Problems:
@@ -156,7 +156,7 @@ class Comment(models.Model):
 
 ---
 
-### [ ] HIGH-2: Video Size Limit Is Inconsistent (50 MB vs 100 MB)
+### [x] HIGH-2: Video Size Limit Is Inconsistent (50 MB vs 100 MB)
 **Files:** `community/models.py:169`, `common/validators.py:47`, `core/settings.py:242`
 
 Problem: `validate_media_size` enforces 50 MB for videos (from `settings.MAX_VIDEO_UPLOAD_SIZE`), but `PostMedia.clean()` uses a hardcoded 100 MB. The effective limit is 50 MB but the model says 100 MB in its error message — confusing and wrong.
@@ -182,7 +182,7 @@ if self.file.size > limit_bytes:
 
 ---
 
-### [ ] HIGH-3: Signal Fires `rebuild_profile_search_vector` on Every User Save
+### [x] HIGH-3: Signal Fires `rebuild_profile_search_vector` on Every User Save
 **File:** `users/models.py:125-136`
 
 Problem: The `post_save` signal on `User` enqueues a Celery task on **every** save — including Django's internal `last_login` update on each login. The search vector only needs rebuilding when `username` changes.
@@ -211,7 +211,7 @@ def create_user_profile(sender, instance, created, update_fields, **kwargs):
 
 ---
 
-### [ ] HIGH-4: `IS_IN_PRODUCTION` Defined Twice
+### [x] HIGH-4: `IS_IN_PRODUCTION` Defined Twice
 **File:** `core/settings.py:240` and `core/settings.py:281`
 
 Problem: Identical line appears twice — copy-paste artifact.
@@ -224,7 +224,7 @@ Fix: Delete line 240. Keep only the single definition at line 281 (directly abov
 
 ---
 
-### [ ] MEDIUM-1: Authorization Logic Leaking Into `perform_create`
+### [x] MEDIUM-1: Authorization Logic Leaking Into `perform_create`
 **File:** `community/views.py:143-163`
 
 Problem: `CommentViewSet.perform_create()` contains 15 lines of visibility/follower permission checks. This is business logic in the view layer — hard to test in isolation, violates DRF's permission architecture.
@@ -233,7 +233,7 @@ Fix: Extract into a `CanCommentOnPost` permission class in `common/permissions.p
 
 ---
 
-### [ ] MEDIUM-2: Celery Broker and Result Backend Share the Same Redis DB
+### [x] MEDIUM-2: Celery Broker and Result Backend Share the Same Redis DB
 **File:** `core/settings.py:249-250`
 
 Problem: Both `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` point to the same Redis database (`/0`). Under load, task result keys pollute the broker's message space. Most of your tasks are fire-and-forget — results are never read.
@@ -250,7 +250,7 @@ CELERY_TASK_IGNORE_RESULT = True  # override per-task if you need the result
 
 ---
 
-### [ ] MEDIUM-3: No Hard Time Limit on Celery Tasks
+### [x] MEDIUM-3: No Hard Time Limit on Celery Tasks
 **File:** `core/settings.py:255`
 
 Problem: `CELERY_TASK_SOFT_TIME_LIMIT = 300` sends `SoftTimeLimitExceeded` but a task that catches all exceptions will run forever. No `CELERY_TASK_TIME_LIMIT` (hard kill) is set.
@@ -264,7 +264,7 @@ CELERY_TASK_TIME_LIMIT = 330        # 5.5 min — hard SIGKILL
 
 ---
 
-### [ ] MEDIUM-4: No Celery Task Routing (CPU vs I/O Tasks Share Workers)
+### [x] MEDIUM-4: No Celery Task Routing (CPU vs I/O Tasks Share Workers)
 **File:** `core/settings.py` / `core/celery.py`
 
 Problem: Image resizing (`process_post_media`) is CPU-bound. Search vector rebuilds and purge tasks are I/O-bound. They all run on the same worker pool, so a burst of image uploads can starve database tasks.
@@ -284,7 +284,7 @@ CELERY_TASK_ROUTES = {
 
 ---
 
-### [ ] MEDIUM-5: Session Backend Has No Database Fallback
+### [x] MEDIUM-5: Session Backend Has No Database Fallback
 **File:** `core/settings.py:139`
 
 Problem: `SESSION_ENGINE = "django.contrib.sessions.backends.cache"` — if Redis goes down, every active session (Django admin, OAuth flow) is immediately lost. JWTs are stateless so the API itself survives, but the admin panel becomes completely unusable.
@@ -301,22 +301,22 @@ SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
 
 ```
 CRITICAL
- [ ] CRITICAL-1  OAuth LOGIN_REDIRECT_URL → /admin/
- [ ] CRITICAL-2  AWS_DEFAULT_ACL = 'public-read'
- [ ] CRITICAL-3  Dead throttle scopes (reaction_spam, search, strict_auth)
- [ ] CRITICAL-4  /api/docs/ and /api/schema/ unprotected in production
- [ ] CRITICAL-5  avatar_upload_path raises ValueError → HTTP 500
+ [ ] CRITICAL-1  OAuth LOGIN_REDIRECT_URL → /admin/                          ← settings.py:84 still '/admin/'
+ [x] CRITICAL-2  AWS_DEFAULT_ACL = 'public-read'
+ [x] CRITICAL-3  Dead throttle scopes (reaction_spam, search, strict_auth)
+ [x] CRITICAL-4  /api/docs/ and /api/schema/ unprotected in production
+ [x] CRITICAL-5  avatar_upload_path raises ValueError → HTTP 500
 
 HIGH
- [ ] HIGH-1      Comment.save() duplicates and overrides Comment.clean()
- [ ] HIGH-2      Video size limit 50 MB vs 100 MB inconsistency
- [ ] HIGH-3      Signal fires rebuild_profile_search_vector on every User save
- [ ] HIGH-4      IS_IN_PRODUCTION defined twice in settings.py
+ [x] HIGH-1      Comment.save() duplicates and overrides Comment.clean()
+ [x] HIGH-2      Video size limit 50 MB vs 100 MB inconsistency
+ [x] HIGH-3      Signal fires rebuild_profile_search_vector on every User save
+ [x] HIGH-4      IS_IN_PRODUCTION defined twice in settings.py
 
 MEDIUM
- [ ] MEDIUM-1    Authorization logic in perform_create (move to permission class)
- [ ] MEDIUM-2    Celery broker and result backend on same Redis DB
- [ ] MEDIUM-3    No hard Celery task time limit (CELERY_TASK_TIME_LIMIT)
- [ ] MEDIUM-4    No task routing (CPU-bound and I/O-bound tasks share workers)
- [ ] MEDIUM-5    Session backend has no database fallback
+ [x] MEDIUM-1    Authorization logic in perform_create (move to permission class)
+ [x] MEDIUM-2    Celery broker and result backend on same Redis DB
+ [x] MEDIUM-3    No hard Celery task time limit (CELERY_TASK_TIME_LIMIT)
+ [x] MEDIUM-4    No task routing (CPU-bound and I/O-bound tasks share workers)
+ [x] MEDIUM-5    Session backend has no database fallback
 ```

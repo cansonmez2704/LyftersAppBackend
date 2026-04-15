@@ -9,10 +9,11 @@ from django.db.models import Q, FloatField
 from django.db.models.functions import Greatest
 
 from rest_framework import serializers, status
-from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from core.throttles import SearchThrottle
 
 from users.models import UserProfile
 from users.serializers import MiniUserProfileSerializer
@@ -77,11 +78,8 @@ def _hybrid_search(queryset, term, search_fields_for_trigram):
     return qs.order_by("-rank")[:RESULTS_PER_TYPE]
 
 
-class SearchRateThrottle(UserRateThrottle):
-    rate = '30/min'
-
 class GlobalSearchView(APIView):
-    throttle_classes = [SearchRateThrottle]
+    throttle_classes = [SearchThrottle]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):

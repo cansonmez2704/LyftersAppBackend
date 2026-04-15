@@ -136,7 +136,7 @@ CACHES = {
     }
 }
 
-SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
 SESSION_CACHE_ALIAS = "default"
 
 ROOT_URLCONF = "core.urls"
@@ -237,28 +237,34 @@ CORS_ALLOWED_ORIGINS = [
     "https://gymhub-frontend.vercel.app", 
 ]
 
-IS_IN_PRODUCTION = os.environ.get('USE_SECURE_PROXY', 'False') == 'True'
+
 MAX_IMAGE_UPLOAD_SIZE = 10 * 1024 * 1024  
 MAX_VIDEO_UPLOAD_SIZE = 50 * 1024 * 1024
 MAX_AVATAR_UPLOAD_SIZE = 5 * 1024 * 1024
 
 CORS_ALLOW_ALL_ORIGINS = False
 
-# --- CELERY SETTINGS ---
-# Use the same Redis URL you already have in your .env
-CELERY_BROKER_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-# Optimization: how many tasks should a worker take at once?
+CELERY_BROKER_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("REDIS_RESULT_URL", "redis://localhost:6379/1")
+CELERY_TASK_IGNORE_RESULT = True  
 CELERY_WORKER_CONCURRENCY = 4
-# Don't let a task run forever
-CELERY_TASK_SOFT_TIME_LIMIT = 300 
-# Accept content types (json is safest)
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TASK_SOFT_TIME_LIMIT = 300  
+CELERY_TASK_TIME_LIMIT = 330     
 
-# --- CELERY BEAT SCHEDULE ---
+
+CELERY_TASK_ROUTES = {
+    'community.tasks.process_post_media': {'queue': 'media'},
+    'users.tasks.resize_avatar':          {'queue': 'media'},
+    'community.tasks.purge_*':            {'queue': 'maintenance'},
+    'common.tasks.reconcile_counters':    {'queue': 'maintenance'},
+    '*':                                   {'queue': 'default'},
+}
+
+
 from celery.schedules import crontab
 
 CELERY_BEAT_SCHEDULE = {
@@ -288,9 +294,10 @@ if IS_IN_PRODUCTION:
     AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME')
     
     # S3 Specific Behaviors
+    AWS_DEFAULT_ACL = None
+    AWS_QUERYSTRING_AUTH = True
+    AWS_QUERYSTRING_EXPIRE = 3600
     AWS_S3_FILE_OVERWRITE = False
-    AWS_DEFAULT_ACL = 'public-read'
-    AWS_S3_VERIFY = True
 
     # 2. Static & Media Locations
     # This creates /static/ and /media/ folders inside your S3 bucket

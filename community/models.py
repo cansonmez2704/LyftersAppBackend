@@ -11,7 +11,7 @@ from common.validators import validate_media_size, validate_real_content_type
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
+MAX_COMMENT_DEPTH = 3 
 def post_image_upload_path(instance, filename):
     """Dynamic upload path: community/posts/<post_uuid>/<filename>"""
     return f"community/posts/{instance.post.uuid}/{filename}"
@@ -160,20 +160,18 @@ class PostMedia(models.Model):
         image_exts = ['.jpg', '.jpeg', '.png', '.gif']
         video_exts = ['.mp4', '.avi', '.mov', '.mkv', '.webm']
 
-        if self.media_type == self.MediaType.IMAGE and ext not in image_exts:
-            raise ValidationError({"file": f"Expected an image file, but got {ext}."})
-            
-        elif self.media_type == self.MediaType.VIDEO and ext not in video_exts:
-            raise ValidationError({"file": f"Expected a video file, but got {ext}."})
-
-        limit_mb = 10 if self.media_type == self.MediaType.IMAGE else 100
-        limit_bytes = limit_mb * 1024 * 1024
+        if self.media_type == self.MediaType.IMAGE:
+            limit_bytes = settings.MAX_IMAGE_UPLOAD_SIZE
+        else:
+            limit_bytes = settings.MAX_VIDEO_UPLOAD_SIZE
 
         if self.file.size > limit_bytes:
+            limit_mb = limit_bytes / (1024 * 1024)
             raise ValidationError(
-                {"file": f"Maximum file size for {self.media_type} is {limit_mb}MB. "
-                         f"Your file is {self.file.size / (1024 * 1024):.1f}MB."}
+                {"file": f"Maximum file size is {limit_mb:.0f} MB. "
+                        f"Your file is {self.file.size / (1024 * 1024):.1f} MB."}
             )
+        
     class Meta:
         indexes = [
             models.Index(fields=["post", "order"])
@@ -189,7 +187,7 @@ class PostMedia(models.Model):
 
 class Comment(models.Model):
    
-
+    
     post   = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="comments")
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -227,30 +225,24 @@ class Comment(models.Model):
             models.Index(fields=["post", "-created_at"]),
         ]
 
+    
+
     def clean(self):
         super().clean()
-        
-        intended_depth = 0
-        if self.parent:
-            intended_depth = self.parent.depth + 1
-        if self.parent and self.parent.post != self.post:
-            raise ValidationError("Replies must belong to the same post as the parent comment.")
-        if self.parent and self.parent.is_deleted:
-            raise ValidationError("Cannot reply to a deleted comment.")
         if not self.body or not self.body.strip():
             raise ValidationError("Comment body cannot be empty.")
-            
-        MAX_COMMENT_DEPTH = 3 
-        if intended_depth > MAX_COMMENT_DEPTH:
-            raise ValidationError(f"You cannot reply more than {MAX_COMMENT_DEPTH} levels deep.")
-            
-        self.depth = intended_depth
-        
-    def save(self, *args, **kwargs):
         if self.parent:
+            if self.parent.post != self.post:
+                raise ValidationError("Reply must belong to the same post as its parent.")
+            if self.parent.is_deleted:
+                raise ValidationError("Cannot reply to a deleted comment.")
             self.depth = self.parent.depth + 1
-            if self.depth > 3:
-                raise ValidationError("Comment depth cant exceed 3")
+            if self.depth > MAX_COMMENT_DEPTH:
+                raise ValidationError(f"Maximum reply depth is {MAX_COMMENT_DEPTH}.")
+        else:
+            self.depth = 0
+
+    def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         
     def __str__(self) -> str:
