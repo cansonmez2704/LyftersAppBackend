@@ -74,19 +74,35 @@ def rebuild_profile_search_vector(self, user_pk):
         raise self.retry(exc=exc)
 
 
-@shared_task
-def bulk_blacklist_tokens(user_id):
-    """Blacklist all outstanding JWT tokens for a user after password change."""
+def blacklist_user_tokens(user_id):
+    """Blacklist all outstanding JWT tokens for a user.
+
+    Runs synchronously so the caller (e.g. ChangePasswordView) can rely on
+    revocation having happened before returning to the client — the old
+    access token becomes unusable immediately instead of up to one access
+    lifetime later.
+    """
     from rest_framework_simplejwt.token_blacklist.models import (
         BlacklistedToken,
         OutstandingToken,
     )
 
-    tokens = OutstandingToken.objects.filter(user_id=user_id)
-    created_count = 0
-    for token in tokens:
-        _, created = BlacklistedToken.objects.get_or_create(token=token)
-        if created:
-            created_count += 1
+    outstanding = OutstandingToken.objects.filter(user_id=user_id)
+    already_blacklisted = set(
+        BlacklistedToken.objects.filter(token__in=outstanding)
+        .values_list("token_id", flat=True)
+    )
+    to_create = [
+        BlacklistedToken(token=token)
+        for token in outstanding
+        if token.pk not in already_blacklisted
+    ]
+    BlacklistedToken.objects.bulk_create(to_create, ignore_conflicts=True)
+    return len(to_create)
 
-    return f"Blacklisted {created_count} tokens for user {user_id}"
+
+@shared_task
+def bulk_blacklist_tokens(user_id):
+    """Async wrapper around blacklist_user_tokens for scheduled cleanup."""
+    created = blacklist_user_tokens(user_id)
+    return f"Blacklisted {created} tokens for user {user_id}"

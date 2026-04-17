@@ -40,13 +40,32 @@ class WorkoutExerciseWriteSerializer(serializers.ModelSerializer):
      
 
 
+class WorkoutListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for list views — no exercise/set tree.
+
+    Pulling the full tree on list pages produced thousands of rows per request
+    (N exercises × M sets × K muscles). Clients that need the tree hit
+    retrieve (`GET /workouts/<uuid>/`) instead.
+    """
+
+    owner = MiniUserProfileSerializer(source="owner.profile", read_only=True)
+
+    class Meta:
+        model = Workout
+        fields = (
+            "id", "uuid", "owner", "name", "description", "cover_image",
+            "visibility", "estimated_duration_min", "is_template",
+            "created_at", "updated_at",
+        )
+
+
 class WorkoutSerializer(serializers.ModelSerializer):
     workout_exercises = WorkoutExerciseSerializer(many=True,read_only=True)
     owner = MiniUserProfileSerializer(source="owner.profile", read_only=True)
-    
+
     class Meta:
         model = Workout
-        fields = ("id","owner","name","description","cover_image","workout_exercises","visibility","estimated_duration_min","is_template","created_at","updated_at")
+        fields = ("id","uuid","owner","name","description","cover_image","workout_exercises","visibility","estimated_duration_min","is_template","created_at","updated_at")
 
     
 

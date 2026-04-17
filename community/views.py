@@ -1,6 +1,7 @@
 from django.db import transaction
 from django.db.models import Q, F, Value, Prefetch
 from django.db.models.functions import Greatest
+from django.shortcuts import get_object_or_404
 
 
 from rest_framework.viewsets import ModelViewSet
@@ -13,110 +14,121 @@ from core.throttles import ReactionSpamThrottle
 
 from common.permissions import IsOwnerOrReadOnly, IsAuthorOnly, IsOwnerOrAdmin, CanCommentOnPost
 from common.reactions import toggle_reaction
+from common.pagination import FeedCursorPagination, CommentLimitOffsetPagination
 
 
 from .serializers import (
-    PostListSerializer, 
-    PostDetailSerializer, 
+    PostListSerializer,
+    PostDetailSerializer,
     CommentSerializer,
     PostReactionSerializer,
-    PostWriteSerializer 
+    PostWriteSerializer,
 )
-from .models import Post, Comment, PostReaction, CommentReaction , ReactionType 
+from .models import Post, Comment, PostReaction, CommentReaction, ReactionType
 from users.models import UserFollower
-from common.pagination import FeedCursorPagination, CommentLimitOffsetPagination
+
+
+def _visible_author_ids(user):
+    """Authors the given user has an accepted follow relationship with."""
+    return UserFollower.objects.filter(
+        from_user=user,
+        status=UserFollower.FollowStatus.ACCEPTED,
+    ).values("to_user_id")
+
 
 class PostViewSet(ModelViewSet):
-   
+    """Global post CRUD. `list` returns every post the caller may see under
+    the visibility rules (public, own, or followers-only from accepted follows).
+    For the "people I follow" timeline, use `FeedView` at /feed/ instead."""
+
     pagination_class = FeedCursorPagination
     lookup_field = 'uuid'
 
     def get_serializer_class(self):
-      if self.action == 'retrieve':
-        return PostDetailSerializer
-     
-      elif self.action in ["create","update","partial_update"]:
-        return PostWriteSerializer
-      
-      return PostListSerializer
+        if self.action == 'retrieve':
+            return PostDetailSerializer
+        elif self.action in ["create", "update", "partial_update"]:
+            return PostWriteSerializer
+        return PostListSerializer
 
     def get_queryset(self):
-     base_queryset = Post.objects.filter(is_deleted=False).select_related("author__profile")
+        base_queryset = Post.objects.filter(is_deleted=False).select_related("author__profile")
 
-     if self.request.user.is_staff:
-        return base_queryset
+        if self.request.user.is_staff:
+            queryset = base_queryset
+        elif self.request.user.is_authenticated:
+            # Subquery-based visibility filter — avoids the M2M join that would
+            # otherwise duplicate rows when the author has many followers.
+            queryset = base_queryset.filter(
+                Q(author=self.request.user)
+                | Q(visibility=Post.Visibility.PUBLIC)
+                | Q(
+                    visibility=Post.Visibility.FOLLOWERS,
+                    author_id__in=_visible_author_ids(self.request.user),
+                )
+            )
+        else:
+            queryset = base_queryset.filter(visibility=Post.Visibility.PUBLIC)
 
-     elif self.request.user.is_authenticated:
-        base_queryset = base_queryset.filter(
-           Q(author=self.request.user)
-           | Q(visibility=Post.Visibility.PUBLIC)
-           | Q(visibility=Post.Visibility.FOLLOWERS,
-            author__incoming_followers__from_user=self.request.user,
-            author__incoming_followers__status=UserFollower.FollowStatus.ACCEPTED,
-        )
-       ) 
-     else:
-        base_queryset = base_queryset.filter(visibility=Post.Visibility.PUBLIC)
+        if self.action == 'retrieve':
+            # Comments and reactions live on their own paginated endpoints —
+            # prefetching them here would pull unbounded rows on a single
+            # post-retrieve, and reactor profiles add PII exposure.
+            return queryset.prefetch_related("media")
+        return queryset.prefetch_related("media")
 
-     if self.action == 'retrieve':
-        return base_queryset.prefetch_related(
-        Prefetch(
-            "comments",
-            queryset=Comment.objects.filter(is_deleted=False)
-                          .select_related("author__profile")
-                          .prefetch_related("reactions__user__profile"),
-        ),
-        "media",
-        "reactions__user__profile",
-    )
-     return base_queryset.prefetch_related("media")
-    
     def get_permissions(self):
         if self.action in ['update', 'partial_update', 'destroy']:
             return [permissions.IsAuthenticated(), IsOwnerOrReadOnly()]
         return [permissions.IsAuthenticated()]
-        
+
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
-        
+
     def perform_destroy(self, instance):
-        instance.is_deleted = True
-        instance.save(update_fields=['is_deleted'])
-    
+        # Conditional update: only the first concurrent delete wins, avoiding
+        # TOCTOU drift on any future denormalized counters tied to this post.
+        Post.objects.filter(pk=instance.pk, is_deleted=False).update(is_deleted=True)
+
     @action(detail=True, methods=["POST"], url_path="react", throttle_classes=[ReactionSpamThrottle])
     def react_to_posts(self, request, uuid=None):
-     post = self.get_object()
-     return toggle_reaction(
-        reaction_model=PostReaction,
-        parent_obj=post,
-        parent_field_name="post",
-        user=request.user,
-        reaction_type=request.data.get("reaction_type"),
-        valid_choices=[ReactionType.LIKE, ReactionType.DISLIKE],
-     )
-     
-    
-    @action(detail=True,methods=["GET"])
-    def reactions(self,request,uuid=None):
-       post = self.get_object()
-       reaction_qs = post.reactions.select_related("user__profile").all() 
-       reaction_type = request.query_params.get('type')
-       if reaction_type:
-          reaction_qs = reaction_qs.filter(reaction_type=reaction_type)
-       
-       page = self.paginate_queryset(reaction_qs)
-       if page is not None:
-            serializer = PostReactionSerializer(page, many=True, context={'request': request})
-            return self.get_paginated_response(serializer.data)
-       
-       serializer = PostReactionSerializer(reaction_qs, many=True, context={'request': request})
-       return Response(serializer.data)
-  
- 
+        post = self.get_object()
+        return toggle_reaction(
+            reaction_model=PostReaction,
+            parent_obj=post,
+            parent_field_name="post",
+            user=request.user,
+            reaction_type=request.data.get("reaction_type"),
+            valid_choices=[ReactionType.LIKE, ReactionType.DISLIKE],
+        )
+
+    @action(
+        detail=True,
+        methods=["GET"],
+        pagination_class=FeedCursorPagination,
+    )
+    def reactions(self, request, uuid=None):
+        post = self.get_object()
+        reaction_qs = (
+            post.reactions
+            .select_related("user__profile")
+            .order_by("-created_at")
+        )
+        reaction_type = request.query_params.get("type")
+        if reaction_type:
+            reaction_qs = reaction_qs.filter(reaction_type=reaction_type)
+
+        paginator = self.paginator
+        page = paginator.paginate_queryset(reaction_qs, request, view=self)
+        serializer = PostReactionSerializer(page, many=True, context={"request": request})
+        return paginator.get_paginated_response(serializer.data)
+
 
 class CommentViewSet(ModelViewSet):
     serializer_class = CommentSerializer
     pagination_class = CommentLimitOffsetPagination
+    lookup_field = "uuid"
+    lookup_url_kwarg = "comment_uuid"
 
     def get_permissions(self):
         if self.action in ['update', 'partial_update']:
@@ -130,78 +142,96 @@ class CommentViewSet(ModelViewSet):
     def get_queryset(self):
         queryset = Comment.objects.filter(is_deleted=False)
         if self.request.user.is_staff or self.request.user.is_superuser:
-            return queryset.select_related("post", "author__profile").prefetch_related("reactions__user__profile")
-        
-
-        queryset = queryset.filter(
-                Q(post__visibility=Post.Visibility.PUBLIC) | Q(post__author=self.request.user)
-                | Q(post__visibility=Post.Visibility.FOLLOWERS, post__author__incoming_followers__from_user=self.request.user, post__author__incoming_followers__status=UserFollower.FollowStatus.ACCEPTED)
-               
+            base = queryset
+        else:
+            # Subquery avoids row duplication from the M2M follower join.
+            base = queryset.filter(
+                Q(post__visibility=Post.Visibility.PUBLIC)
+                | Q(post__author=self.request.user)
+                | Q(
+                    post__visibility=Post.Visibility.FOLLOWERS,
+                    post__author_id__in=_visible_author_ids(self.request.user),
+                )
             )
-        post_uuid = self.request.query_params.get('post')
+
+        post_uuid = self.kwargs.get('post_uuid') or self.request.query_params.get('post')
         if post_uuid:
-            queryset = queryset.filter(post__uuid=post_uuid)
-        return queryset.select_related("post", "author__profile").prefetch_related("reactions__user__profile")
+            base = base.filter(post__uuid=post_uuid)
+
+        parent_uuid = self.kwargs.get("parent_uuid")
+        if parent_uuid:
+            base = base.filter(parent__uuid=parent_uuid)
+        elif self.action == "list" and post_uuid:
+            # Top-level comments only on the post-comments list; replies are
+            # fetched via /comments/<uuid>/replies/.
+            base = base.filter(parent__isnull=True)
+
+        return base.select_related("post", "author__profile").prefetch_related("reactions__user__profile")
 
     def perform_create(self, serializer):
-        post = serializer.validated_data.get('post')
+        post = get_object_or_404(
+            Post.objects.filter(is_deleted=False),
+            uuid=self.kwargs["post_uuid"],
+        )
         self.check_object_permissions(self.request, post)
-        serializer.save(author=self.request.user)
-        Post.objects.filter(uuid=post.uuid).update(comments_count=F("comments_count") + 1)
-        
+        serializer.save(author=self.request.user, post=post)
+        Post.objects.filter(pk=post.pk).update(comments_count=F("comments_count") + 1)
+
     def perform_destroy(self, instance):
-        if instance.is_deleted:
+        # Atomic conditional soft-delete: only the first delete wins, so the
+        # comments_count decrement never runs twice for the same comment.
+        # Children keep their parent link + depth; the UI greys out the
+        # deleted node via `is_deleted`, preserving the reply tree structure.
+        updated = Comment.objects.filter(pk=instance.pk, is_deleted=False).update(is_deleted=True)
+        if not updated:
             return
 
-        with transaction.atomic():
-
-            Comment.objects.filter(parent=instance).update(parent=None, depth=0)
-
-            instance.is_deleted = True
-            instance.save(update_fields=['is_deleted'])
-
-            Post.objects.filter(uuid=instance.post.uuid).update(
-                comments_count=Greatest(F("comments_count") - 1, Value(0))
-            )
+        Post.objects.filter(pk=instance.post_id).update(
+            comments_count=Greatest(F("comments_count") - 1, Value(0))
+        )
 
     @action(detail=True, methods=["POST"], url_path="react", throttle_classes=[ReactionSpamThrottle])
-    def react_to_comments(self, request, pk=None):
-     comment = self.get_object()
-     return toggle_reaction(
-        reaction_model=CommentReaction,
-        parent_obj=comment,
-        parent_field_name="comment",
-        user=request.user,
-        reaction_type=request.data.get("reaction_type"),
-        valid_choices=[ReactionType.LIKE, ReactionType.DISLIKE],
-     )
+    def react_to_comments(self, request, comment_uuid=None):
+        comment = self.get_object()
+        return toggle_reaction(
+            reaction_model=CommentReaction,
+            parent_obj=comment,
+            parent_field_name="comment",
+            user=request.user,
+            reaction_type=request.data.get("reaction_type"),
+            valid_choices=[ReactionType.LIKE, ReactionType.DISLIKE],
+        )
 
 
 class FeedView(ListAPIView):
+    """Personalized timeline: posts authored by the current user or by users
+    they follow (accepted). Differs from `PostViewSet.list`, which applies
+    global visibility filters but does not restrict by follow graph."""
+
     serializer_class = PostListSerializer
     pagination_class = FeedCursorPagination
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-     if self.request.user.is_staff:
+        if self.request.user.is_staff:
+            return (
+                Post.objects.filter(is_deleted=False)
+                .select_related("author", "author__profile")
+                .prefetch_related("media")
+                .order_by("-created_at")
+            )
+
+        following_ids = UserFollower.objects.filter(
+            from_user=self.request.user,
+            status=UserFollower.FollowStatus.ACCEPTED,
+        ).values("to_user")
+
         return (
-            Post.objects.filter(is_deleted=False)
-            .select_related("author", "author__profile") 
+            Post.objects.filter(
+                Q(author_id__in=following_ids) | Q(author=self.request.user),
+                is_deleted=False,
+            )
+            .select_related("author__profile")
             .prefetch_related("media")
             .order_by("-created_at")
         )
-
-     following_ids = UserFollower.objects.filter(
-        from_user=self.request.user,
-        status=UserFollower.FollowStatus.ACCEPTED
-    ).values("to_user")
-
-     return (
-        Post.objects.filter(
-            Q( author_id__in=following_ids) | Q(author=self.request.user),
-            is_deleted=False,
-        )
-        .select_related( "author__profile")
-        .prefetch_related("media")
-        .order_by("-created_at")
-    )

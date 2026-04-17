@@ -17,10 +17,10 @@ def validate_real_content_type(file):
     ]
 
     initial_position = file.tell()
-    
+
     file.seek(0)
-    file_chunk = file.read(2048)
-    
+    file_chunk = file.read(8192)
+
     file.seek(initial_position)
     mime_type = magic.from_buffer(file_chunk, mime=True)
 

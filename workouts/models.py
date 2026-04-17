@@ -77,6 +77,12 @@ class Exercise(models.Model):
         default="",
         help_text="e.g. 'Barbell, Bench' or 'Bodyweight'.",
     )
+    uuid = models.UUIDField(
+        default=uuid_lib.uuid4,
+        editable=False,
+        unique=True,
+        db_index=True,
+    )
     search_vector = SearchVectorField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -227,6 +233,10 @@ class WorkoutSet(models.Model):
             models.UniqueConstraint(
                 fields=["workout_exercise", "set_number"],
                 name="unique_set_number_per_exercise",
+            ),
+            models.CheckConstraint(
+                check=Q(reps__isnull=False) | Q(duration_seconds__isnull=False),
+                name="set_must_have_reps_or_duration",
             ),
         ]
     def __str__(self) -> str:

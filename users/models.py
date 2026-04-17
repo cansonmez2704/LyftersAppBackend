@@ -108,6 +108,11 @@ class UserProfile(models.Model):
         verbose_name_plural = "User Profiles"
         indexes = [
             GinIndex(fields=["search_vector"], name="userprofile_search_gin"),
+            models.Index(
+                fields=["user"],
+                name="userprofile_public_idx",
+                condition=Q(is_public=True),
+            ),
         ]
    
     def __str__(self) -> str:
@@ -139,9 +144,19 @@ def create_user_profile(sender, instance, created, update_fields, **kwargs):
         )
 
 
+SEARCH_RELEVANT_PROFILE_FIELDS = frozenset({"bio"})
+
+
 @receiver(post_save, sender=UserProfile)
-def update_profile_search_vector(sender, instance, **kwargs):
-    """Update search vector whenever the profile itself is saved."""
+def update_profile_search_vector(sender, instance, created, update_fields, **kwargs):
+    """Rebuild the FTS vector only when a field the vector actually indexes
+    changes. Without this gate, every followers_count bump or avatar resize
+    would enqueue a Celery task that runs a UPDATE ... tsvector query for no
+    reason."""
+    changed = set(update_fields or [])
+    if not created and update_fields and not (changed & SEARCH_RELEVANT_PROFILE_FIELDS):
+        return
+
     from users.tasks import rebuild_profile_search_vector
     transaction.on_commit(
         lambda: rebuild_profile_search_vector.delay(instance.user_id)

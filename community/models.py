@@ -1,10 +1,12 @@
-import uuid, os 
+import uuid, os
 from django.db import models
 from django.conf import settings
 from django.utils.text import slugify
-from django.core.validators import FileExtensionValidator
+from django.core.validators import FileExtensionValidator, MaxLengthValidator
 from django.core.exceptions import ValidationError
 from common.validators import validate_media_size, validate_real_content_type
+
+POST_DESCRIPTION_MAX_LENGTH = 5000
 
 
 
@@ -52,11 +54,19 @@ class Post(models.Model):
    
     title       = models.CharField(max_length=300, blank=True, help_text="Optional headline for the post.")
     slug        = models.SlugField(max_length=350, blank=True, unique=True, help_text="Auto-generated from title.")
-    description = models.TextField(help_text="Main body / caption of the post.")
+    description = models.TextField(
+        help_text="Main body / caption of the post.",
+        validators=[MaxLengthValidator(POST_DESCRIPTION_MAX_LENGTH)],
+    )
     cover_image = models.ImageField(
         upload_to=post_cover_upload_path,
         blank=True,
         null=True,
+        validators=[
+            FileExtensionValidator(['jpg', 'jpeg', 'png', 'gif']),
+            validate_media_size,
+            validate_real_content_type,
+        ],
         help_text="Optional single cover/header image.",
     )
 
@@ -109,10 +119,14 @@ class Post(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        
+        # 12 hex chars give ~2.8e14 possibilities — collision risk is far
+        # below Post.slug's unique-constraint failure surface. 8 hex chars
+        # (the old value) only covered 4.3e9 and did hit IntegrityError
+        # → 500 in practice on large tables.
         if self.title and not self.slug:
             base_slug = slugify(self.title)
-            self.slug = f"{base_slug}-{str(self.uuid)[:8]}" if base_slug else str(self.uuid)[:8]
+            suffix = str(self.uuid).replace("-", "")[:12]
+            self.slug = f"{base_slug}-{suffix}" if base_slug else suffix
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
@@ -203,6 +217,12 @@ class Comment(models.Model):
         help_text="Set to create a reply to another comment.",
     )
 
+    uuid = models.UUIDField(
+        default=uuid.uuid4,
+        editable=False,
+        unique=True,
+        db_index=True,
+    )
     body = models.TextField(help_text="The comment text.")
     depth = models.PositiveSmallIntegerField(default=0)
 
@@ -273,6 +293,7 @@ class PostReaction(models.Model):
         ]
         indexes = [
             models.Index(fields=["post", "reaction_type"]),
+            models.Index(fields=["user", "-created_at"], name="postreaction_user_idx"),
         ]
 
     def __str__(self) -> str:
@@ -294,6 +315,7 @@ class CommentReaction(models.Model):
         ]
         indexes = [
             models.Index(fields=["comment", "reaction_type"]),
+            models.Index(fields=["user", "-created_at"], name="commentreaction_user_idx"),
         ]
 
     def __str__(self) -> str:

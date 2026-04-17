@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken, OutstandingToken, BlacklistedToken, TokenError
 from .models import UserProfile, UserFollower
-from .serializers import UserRegisterSerializer, FullUserProfileSerializer, MiniUserProfileSerializer, ChangePasswordSerializer
+from .serializers import UserRegisterSerializer, FullUserProfileSerializer, MiniUserProfileSerializer, ChangePasswordSerializer , OwnProfileSerializer
 from common.pagination import FeedCursorPagination
 from common.follow import toggle_follow
 
@@ -54,10 +54,7 @@ class LogoutView(APIView):
                 )
             token = RefreshToken(refresh_token)
             token.blacklist()
-            return Response(
-                {"message": "Successfully logged out."}, 
-                status=status.HTTP_205_RESET_CONTENT
-            )
+            return Response(status=status.HTTP_204_NO_CONTENT)
             
         except TokenError:
             return Response(
@@ -81,19 +78,21 @@ class ChangePasswordView(APIView):
             user.set_password(serializer.validated_data['new_password'])
             user.save()
 
-            # Blacklist all tokens asynchronously
-            from users.tasks import bulk_blacklist_tokens
-            bulk_blacklist_tokens.delay(user.id)
-            
+            # Revoke outstanding tokens synchronously. If we queue this, the
+            # attacker who triggered the password change can keep using their
+            # access token until the Celery worker picks up the job.
+            from users.tasks import blacklist_user_tokens
+            blacklist_user_tokens(user.id)
+
             return Response(
-                {"message": "Password updated successfully."}, 
+                {"message": "Password updated successfully."},
                 status=status.HTTP_200_OK
             )
             
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class MyProfileView(generics.RetrieveUpdateAPIView):
-    serializer_class = FullUserProfileSerializer
+    serializer_class = OwnProfileSerializer
     permission_classes = [IsAuthenticated]
 
     def get_object(self):

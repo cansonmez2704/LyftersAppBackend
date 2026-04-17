@@ -5,113 +5,156 @@ Celery tasks for the common app.
 import logging
 
 from celery import shared_task
-from django.db.models import Count, Q, Value
-from django.db.models.functions import Coalesce
+from django.db.models import Case, Count, IntegerField, Sum, Value, When
 
 logger = logging.getLogger(__name__)
+
+
+def _bulk_sync_counter(model, field_name, computed_values):
+    """Update `model.<field_name>` for every pk in `computed_values` where
+    the stored value diverges. Returns the number of rows updated.
+
+    `computed_values` is an iterable of (pk, actual_value) tuples.
+    """
+    computed = dict(computed_values)
+    existing = dict(
+        model.objects.filter(pk__in=computed.keys())
+        .values_list("pk", field_name)
+    )
+    fixes = 0
+    for pk, actual in computed.items():
+        if existing.get(pk, 0) != actual:
+            model.objects.filter(pk=pk).update(**{field_name: actual})
+            fixes += 1
+    return fixes
 
 
 @shared_task
 def reconcile_counters():
     """Recount all denormalized counters from actual rows.
-    
-    Fixes any drift caused by failed transactions, race conditions,
-    or bugs in the F() expression counter updates.
-    
-    Runs every 6 hours via Celery Beat.
+
+    Fixes any drift caused by failed transactions, race conditions, or bugs in
+    the F() expression counter updates. Runs every 6 hours via Celery Beat.
+
+    Uses one GROUP BY query per counter instead of an N+1 loop so the runtime
+    is bounded by counter groups, not total rows.
     """
-    results = {}
-
-    # ------------------------------------------------------------------
-    # 1. UserProfile: followers_count, following_count
-    # ------------------------------------------------------------------
     from users.models import UserProfile, UserFollower
+    from community.models import Post, PostReaction, Comment, CommentReaction, ReactionType
 
-    profiles = UserProfile.objects.all()
-    profile_fixes = 0
+    results = {}
+    accepted = UserFollower.FollowStatus.ACCEPTED
 
-    for profile in profiles.select_related("user"):
-        actual_followers = UserFollower.objects.filter(
-            to_user=profile.user,
-            status=UserFollower.FollowStatus.ACCEPTED,
-        ).count()
+    # -- UserProfile ----------------------------------------------------------
+    followers_by_user = (
+        UserFollower.objects.filter(status=accepted)
+        .values("to_user_id")
+        .annotate(c=Count("id"))
+        .values_list("to_user_id", "c")
+    )
+    following_by_user = (
+        UserFollower.objects.filter(status=accepted)
+        .values("from_user_id")
+        .annotate(c=Count("id"))
+        .values_list("from_user_id", "c")
+    )
 
-        actual_following = UserFollower.objects.filter(
-            from_user=profile.user,
-            status=UserFollower.FollowStatus.ACCEPTED,
-        ).count()
+    followers_map = dict(followers_by_user)
+    following_map = dict(following_by_user)
 
-        updates = {}
-        if profile.followers_count != actual_followers:
-            updates["followers_count"] = actual_followers
-        if profile.following_count != actual_following:
-            updates["following_count"] = actual_following
-
-        if updates:
-            UserProfile.objects.filter(pk=profile.pk).update(**updates)
-            profile_fixes += 1
-
+    profile_ids = list(UserProfile.objects.values_list("pk", "user_id"))
+    profile_fixes = _bulk_sync_counter(
+        UserProfile,
+        "followers_count",
+        ((pk, followers_map.get(user_id, 0)) for pk, user_id in profile_ids),
+    )
+    profile_fixes += _bulk_sync_counter(
+        UserProfile,
+        "following_count",
+        ((pk, following_map.get(user_id, 0)) for pk, user_id in profile_ids),
+    )
     results["profile_fixes"] = profile_fixes
 
-    # ------------------------------------------------------------------
-    # 2. Post: likes_count, dislikes_count, comments_count
-    # ------------------------------------------------------------------
-    from community.models import Post, PostReaction, Comment
+    # -- Post -----------------------------------------------------------------
+    post_reaction_counts = (
+        PostReaction.objects.values("post_id")
+        .annotate(
+            likes=Sum(Case(
+                When(reaction_type=ReactionType.LIKE, then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField(),
+            )),
+            dislikes=Sum(Case(
+                When(reaction_type=ReactionType.DISLIKE, then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField(),
+            )),
+        )
+        .values_list("post_id", "likes", "dislikes")
+    )
+    likes_map = {pid: (likes or 0) for pid, likes, _ in post_reaction_counts}
+    dislikes_map = {pid: (dislikes or 0) for pid, _, dislikes in post_reaction_counts}
 
-    posts = Post.objects.filter(is_deleted=False)
-    post_fixes = 0
+    comments_map = dict(
+        Comment.objects.filter(is_deleted=False)
+        .values("post_id")
+        .annotate(c=Count("id"))
+        .values_list("post_id", "c")
+    )
 
-    for post in posts:
-        actual_likes = PostReaction.objects.filter(
-            post=post, reaction_type="like"
-        ).count()
-        actual_dislikes = PostReaction.objects.filter(
-            post=post, reaction_type="dislike"
-        ).count()
-        actual_comments = Comment.objects.filter(
-            post=post, is_deleted=False
-        ).count()
-
-        updates = {}
-        if post.likes_count != actual_likes:
-            updates["likes_count"] = actual_likes
-        if post.dislikes_count != actual_dislikes:
-            updates["dislikes_count"] = actual_dislikes
-        if post.comments_count != actual_comments:
-            updates["comments_count"] = actual_comments
-
-        if updates:
-            Post.objects.filter(pk=post.pk).update(**updates)
-            post_fixes += 1
-
+    active_post_ids = list(
+        Post.objects.filter(is_deleted=False).values_list("pk", flat=True)
+    )
+    post_fixes = _bulk_sync_counter(
+        Post,
+        "likes_count",
+        ((pk, likes_map.get(pk, 0)) for pk in active_post_ids),
+    )
+    post_fixes += _bulk_sync_counter(
+        Post,
+        "dislikes_count",
+        ((pk, dislikes_map.get(pk, 0)) for pk in active_post_ids),
+    )
+    post_fixes += _bulk_sync_counter(
+        Post,
+        "comments_count",
+        ((pk, comments_map.get(pk, 0)) for pk in active_post_ids),
+    )
     results["post_fixes"] = post_fixes
 
-    # ------------------------------------------------------------------
-    # 3. Comment: likes_count, dislikes_count
-    # ------------------------------------------------------------------
-    from community.models import CommentReaction
+    # -- Comment --------------------------------------------------------------
+    comment_reaction_counts = (
+        CommentReaction.objects.values("comment_id")
+        .annotate(
+            likes=Sum(Case(
+                When(reaction_type=ReactionType.LIKE, then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField(),
+            )),
+            dislikes=Sum(Case(
+                When(reaction_type=ReactionType.DISLIKE, then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField(),
+            )),
+        )
+        .values_list("comment_id", "likes", "dislikes")
+    )
+    c_likes_map = {cid: (likes or 0) for cid, likes, _ in comment_reaction_counts}
+    c_dislikes_map = {cid: (dislikes or 0) for cid, _, dislikes in comment_reaction_counts}
 
-    comments = Comment.objects.filter(is_deleted=False)
-    comment_fixes = 0
-
-    for comment in comments:
-        actual_likes = CommentReaction.objects.filter(
-            comment=comment, reaction_type="like"
-        ).count()
-        actual_dislikes = CommentReaction.objects.filter(
-            comment=comment, reaction_type="dislike"
-        ).count()
-
-        updates = {}
-        if comment.likes_count != actual_likes:
-            updates["likes_count"] = actual_likes
-        if comment.dislikes_count != actual_dislikes:
-            updates["dislikes_count"] = actual_dislikes
-
-        if updates:
-            Comment.objects.filter(pk=comment.pk).update(**updates)
-            comment_fixes += 1
-
+    active_comment_ids = list(
+        Comment.objects.filter(is_deleted=False).values_list("pk", flat=True)
+    )
+    comment_fixes = _bulk_sync_counter(
+        Comment,
+        "likes_count",
+        ((pk, c_likes_map.get(pk, 0)) for pk in active_comment_ids),
+    )
+    comment_fixes += _bulk_sync_counter(
+        Comment,
+        "dislikes_count",
+        ((pk, c_dislikes_map.get(pk, 0)) for pk in active_comment_ids),
+    )
     results["comment_fixes"] = comment_fixes
 
     summary = (

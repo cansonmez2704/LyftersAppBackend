@@ -23,16 +23,18 @@ from django.conf import settings
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path('api/auth/', include('dj_rest_auth.urls')),
-    path('accounts/', include('allauth.urls')),
-    path("api/v1/",include("common.urls")),
-    path("api/v1/users/",include("users.urls")),
-    path("api/v1/workouts/",include("workouts.urls")),
-    path("api/v1/community/",include("community.urls")),
+    path("api/v1/auth/", include("dj_rest_auth.urls")),
+    path("api/v1/", include("common.urls")),
+    path("api/v1/users/", include("users.urls")),
+    path("api/v1/workouts/", include("workouts.urls")),
+    path("api/v1/community/", include("community.urls")),
 ]
 
 if settings.DEBUG:
     urlpatterns += [
+        # allauth's HTML flows (login pages, email confirmation links) are only
+        # useful in dev — production traffic uses the JWT endpoints under /api/v1/auth/.
+        path("accounts/", include("allauth.urls")),
         path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
         path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     ]

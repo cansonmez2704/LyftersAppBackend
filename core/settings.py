@@ -14,15 +14,23 @@ from pathlib import Path
 from datetime import timedelta
 import os
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR/".env")
 
 SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise ImproperlyConfigured(
+        "SECRET_KEY must be set to a non-empty value before Django can start."
+    )
+
 DEBUG = os.getenv("DEBUG") == "True"
 
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
+# Strip empties and whitespace so a typo like `ALLOWED_HOSTS=a,,b` doesn't
+# leave a silent empty-host entry in the list.
+ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h.strip()]
 
 
 
@@ -51,7 +59,6 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "corsheaders",
     "rest_framework",
-    "rest_framework.authtoken", # <-- ADD THIS (Needed for dj-rest-auth)
     "storages",
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
@@ -107,11 +114,13 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
-   
+
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
+
+    'EXCEPTION_HANDLER': 'core.exceptions.custom_exception_handler',
 
    'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',   
@@ -162,6 +171,11 @@ WSGI_APPLICATION = "core.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+# Only disable server-side cursors when running behind pgBouncer in transaction
+# pooling mode. Direct Postgres connections benefit from server-side cursors for
+# the large-result-set queries used by FeedCursorPagination.
+USE_PGBOUNCER = os.getenv("USE_PGBOUNCER", "False") == "True"
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
@@ -170,14 +184,25 @@ DATABASES = {
         "PASSWORD": os.getenv("DB_PASSWORD"),
         "HOST": "localhost",
         "PORT": "5432",
-        "DISABLE_SERVER_SIDE_CURSORS": True,
+        "DISABLE_SERVER_SIDE_CURSORS": USE_PGBOUNCER,
     }
 }
 
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
-    "REFRESH_TOKEN_LIFETIME": timedelta(hours=1),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "ALGORITHM": "HS256",
+}
+
+# dj-rest-auth: JWT-only, no DRF authtoken.
+REST_AUTH = {
+    "USE_JWT": True,
+    "JWT_AUTH_HTTPONLY": False,
+    "SESSION_LOGIN": False,
+    "TOKEN_MODEL": None,
 }
 
 # Password validation
@@ -238,9 +263,17 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 
-MAX_IMAGE_UPLOAD_SIZE = 10 * 1024 * 1024  
+MAX_IMAGE_UPLOAD_SIZE = 10 * 1024 * 1024
 MAX_VIDEO_UPLOAD_SIZE = 50 * 1024 * 1024
 MAX_AVATAR_UPLOAD_SIZE = 5 * 1024 * 1024
+
+# Cap non-file request bodies (JSON/form) and file uploads. Keep comfortably
+# below any upstream nginx/ALB limit. Videos use streamed multipart uploads,
+# so FILE_UPLOAD_MAX_MEMORY_SIZE only controls the in-memory buffer cutoff
+# before Django spills to a TemporaryUploadedFile.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024        # 10 MB JSON/form body
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024         # 5 MB before disk spill
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 1000
 
 CORS_ALLOW_ALL_ORIGINS = False
 
