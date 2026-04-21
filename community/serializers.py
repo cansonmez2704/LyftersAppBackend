@@ -31,6 +31,12 @@ class CommentReactionSerializer(serializers.ModelSerializer):
 
 class CommentSerializer(serializers.ModelSerializer):
     author = MiniUserProfileSerializer(source="author.profile", read_only=True)
+    parent = serializers.SlugRelatedField(
+        slug_field="uuid",
+        queryset=Comment.objects.all(),
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = Comment

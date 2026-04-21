@@ -6,6 +6,8 @@ from .views import (
     LogoutView, ChangePasswordView,
     FollowUserView, AcceptFollowView, RejectFollowView,
     FollowerListView, FollowingListView,
+    SuggestionsView,
+    IncomingFollowRequestsView,
 )
 
 
@@ -39,4 +41,10 @@ urlpatterns = [
     # Follower / Following lists
     path("profiles/<uuid:uuid>/followers/", FollowerListView.as_view(), name="follower-list"),
     path("profiles/<uuid:uuid>/following/", FollowingListView.as_view(), name="following-list"),
+
+    # Suggestions
+    path("suggestions/", SuggestionsView.as_view(), name="profile-suggestions"),
+
+    # Incoming follow requests (for private accounts)
+    path("follow-requests/", IncomingFollowRequestsView.as_view(), name="incoming-follow-requests"),
 ]

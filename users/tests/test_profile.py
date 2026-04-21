@@ -81,8 +81,10 @@ class MyProfileViewTest(APITestCase):
         stranger_read_response = self.client.get(arnold_profile_link)
         self.assertEqual(stranger_read_response.status_code,status.HTTP_200_OK)
 
-        self.assertNotIn('bio', stranger_read_response.data)
-        self.assertNotIn('weight', stranger_read_response.data)
+        # Private profiles are discoverable; restricted data (posts/workouts) stays hidden.
+        self.assertEqual(stranger_read_response.data.get("is_public"), False)
+        self.assertNotIn("posts", stranger_read_response.data)
+        self.assertNotIn("workouts", stranger_read_response.data)
 
         self.assertEqual(stranger_read_response.data['user']['username'], "arnold")
     

@@ -31,7 +31,7 @@ class ExerciseViewSetTests(APITestCase):
             slug="squat",
             exercise_type=Exercise.ExerciseType.WEIGHTLIFTING
         )
-        self.detail_url = reverse("exercises-detail", kwargs={"pk": self.exercise.pk})
+        self.detail_url = reverse("exercises-detail", kwargs={"uuid": self.exercise.uuid})
         self.create_payload = {
             "name": "Deadlift",
             "slug": "deadlift-barbell",
@@ -130,7 +130,7 @@ class WorkoutViewSetTests(APITestCase):
         )
         
      
-        self.workouts_detail_url = reverse("workouts-detail", kwargs={"pk": self.push_day.pk})
+        self.workouts_detail_url = reverse("workouts-detail", kwargs={"uuid": self.push_day.uuid})
 
     def test_unauthenticate_user_read_rejection(self):
    
@@ -188,7 +188,7 @@ class WorkoutViewSetTests(APITestCase):
             name="Arnold's Secret Olympia Prep",
             visibility=Workout.Visibility.PRIVATE
         )
-         private_url = reverse("workouts-detail",kwargs={"pk":private_workout.pk})
+         private_url = reverse("workouts-detail",kwargs={"uuid":private_workout.uuid})
 
          stranger = User.objects.create_user(
             username="nosy_lifter", 
@@ -205,11 +205,11 @@ class WorkoutViewSetTests(APITestCase):
     def test_owner_allowed_full_crud_on_own_workout(self):
    
          owner = self.push_day.owner
-         pk = self.push_day.pk
+         uuid = self.push_day.uuid
 
          self.client.force_authenticate(user = owner)
 
-         workout_url = reverse("workouts-detail",kwargs={"pk":pk})
+         workout_url = reverse("workouts-detail",kwargs={"uuid":uuid})
  
          response_read = self.client.get(workout_url)
          self.assertEqual(response_read.status_code,status.HTTP_200_OK)

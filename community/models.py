@@ -123,8 +123,11 @@ class Post(models.Model):
         # below Post.slug's unique-constraint failure surface. 8 hex chars
         # (the old value) only covered 4.3e9 and did hit IntegrityError
         # → 500 in practice on large tables.
-        if self.title and not self.slug:
-            base_slug = slugify(self.title)
+        # Always ensure `slug` is non-empty and unique.
+        # With `unique=True` + `blank=True`, multiple posts with no title would
+        # otherwise attempt to insert slug="" and crash with IntegrityError.
+        if not self.slug:
+            base_slug = slugify(self.title) if self.title else ""
             suffix = str(self.uuid).replace("-", "")[:12]
             self.slug = f"{base_slug}-{suffix}" if base_slug else suffix
         super().save(*args, **kwargs)

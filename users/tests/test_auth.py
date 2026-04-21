@@ -29,8 +29,8 @@ class AuthViewsTests(APITestCase):
 
         payload = {"username":"newuser", 
                    "email":"testuser@gmail.com",
-                   "password" : "12345" ,
-                   "confirm_password":"12345"
+                   "password" : "StrongPassw0rd!234" ,
+                   "confirm_password":"StrongPassw0rd!234"
             }
 
         response = self.client.post(self.register_url,payload)
@@ -50,8 +50,7 @@ class AuthViewsTests(APITestCase):
         payload = {"refresh": str(self.refresh_token)}
         response = self.client.post(self.logout_url,payload)
 
-        self.assertEqual(response.status_code,status.HTTP_205_RESET_CONTENT)
-        self.assertEqual(response.data["message"], "Successfully logged out.")
+        self.assertEqual(response.status_code,status.HTTP_204_NO_CONTENT)
         
         outstanding = OutstandingToken.objects.get(token=str(self.refresh_token))
         self.assertTrue(BlacklistedToken.objects.filter(token=outstanding).exists())

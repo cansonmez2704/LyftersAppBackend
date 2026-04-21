@@ -242,7 +242,7 @@ class ProfileNetworkListViewTests(APITestCase):
             with self.subTest(url=url):
                 response = self.client.get(url)
                 self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-                self.assertEqual(response.data["detail"], "This profile is private.")
+                self.assertEqual(response.data["error"]["message"], "This profile is private.")
 
     def test_account_owner_can_view_own_lists(self):
         self.profile_target.is_public = False

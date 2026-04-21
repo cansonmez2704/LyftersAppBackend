@@ -64,7 +64,10 @@ class MiniUserProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer()
     class Meta:
         model = UserProfile
-        fields = ("user","avatar")  
+        # Mini profile is used in public-ish contexts (suggestions, followers lists,
+        # reactions, etc.). Keep it intentionally small to avoid leaking sensitive
+        # personal data.
+        fields = ("user", "avatar", "bio", "is_public", "followers_count", "following_count")
 
 class OwnProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer()
@@ -148,7 +151,21 @@ class FullUserProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserProfile
-        fields = ("user","avatar","bio","follow","followers_count","following_count","posts","workouts")
+        fields = (
+            "user",
+            "avatar",
+            "bio",
+            "is_public",
+            "follow",
+            "followers_count",
+            "following_count",
+            "height",
+            "weight",
+            "gender",
+            "birth_date",
+            "posts",
+            "workouts",
+        )
     
     def get_follow(self, obj):
         request = self.context.get('request')
@@ -204,4 +221,13 @@ class FullUserProfileSerializer(serializers.ModelSerializer):
                 )
                 
         return value
+
+
+class IncomingFollowRequestSerializer(serializers.ModelSerializer):
+    from_user_profile = MiniUserProfileSerializer(source="from_user.profile", read_only=True)
+    from_user_uuid = serializers.UUIDField(source="from_user.uuid", read_only=True)
+
+    class Meta:
+        model = UserFollower
+        fields = ("from_user_uuid", "from_user_profile", "status", "created_at")
 

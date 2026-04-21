@@ -9,6 +9,8 @@ from rest_framework.generics import ListAPIView
 from rest_framework.decorators import action
 from rest_framework import permissions
 from rest_framework.response import Response
+from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
+from django.http import QueryDict
 
 from core.throttles import ReactionSpamThrottle
 
@@ -43,6 +45,89 @@ class PostViewSet(ModelViewSet):
 
     pagination_class = FeedCursorPagination
     lookup_field = 'uuid'
+    parser_classes = (JSONParser, FormParser, MultiPartParser)
+
+    def _normalized_write_data(self, request):
+        """
+        DRF's multipart parsing is inconsistent for nested list serializers.
+        Accept common client encodings and normalize into:
+            {"media": [{"file": <InMemoryUploadedFile>, "media_type": "...", ...}, ...]}
+        """
+        data = request.data
+        if not isinstance(data, QueryDict):
+            return data
+
+        # Avoid QueryDict.copy() / deepcopy: it tries to deepcopy file handles
+        # (TemporaryUploadedFile) which can raise pickling errors on large uploads.
+        base = data
+
+        # QueryDict -> plain dict (keep last scalar value)
+        normalized = {k: base.get(k) for k in base.keys()}
+
+        # Ensure file fields are present on the normalized dict.
+        for file_key, file_obj in request.FILES.items():
+            normalized[file_key] = file_obj
+
+        media_items = []
+        i = 0
+        while True:
+            # Support both bracket and dotted forms
+            file_obj = (
+                request.FILES.get(f"media[{i}][file]")
+                or request.FILES.get(f"media[{i}].file")
+                or request.FILES.get(f"media[{i}]file")
+            )
+            media_type = (
+                base.get(f"media[{i}][media_type]")
+                or base.get(f"media[{i}].media_type")
+                or base.get(f"media[{i}]media_type")
+            )
+            order = (
+                base.get(f"media[{i}][order]")
+                or base.get(f"media[{i}].order")
+                or base.get(f"media[{i}]order")
+            )
+            alt_text = (
+                base.get(f"media[{i}][alt_text]")
+                or base.get(f"media[{i}].alt_text")
+                or base.get(f"media[{i}]alt_text")
+                or ""
+            )
+
+            if file_obj is None and media_type is None and order is None:
+                break
+
+            media_items.append({
+                "file": file_obj,
+                "media_type": media_type,
+                "order": order if order is not None else i,
+                "alt_text": alt_text,
+            })
+            i += 1
+
+        if media_items:
+            normalized["media"] = media_items
+
+        return normalized
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=self._normalized_write_data(request))
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=201, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance,
+            data=self._normalized_write_data(request),
+            partial=partial,
+        )
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
 
     def get_serializer_class(self):
         if self.action == 'retrieve':

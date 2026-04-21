@@ -53,9 +53,10 @@ class CommentViewSetTest(APITestCase):
             body="This is a reply to the first comment"
         )
 
-        self.comments_list_url = reverse("comments-list")
-        self.private_comment_url = reverse("comments-detail",kwargs={"pk":self.comment_to_private.pk})
-        self.public_comment_url = reverse("comments-detail",kwargs={"pk":self.comment_to_public.pk})
+        self.comments_list_url = reverse("post-comments", kwargs={"post_uuid": self.post_public.uuid})
+        self.private_comments_list_url = reverse("post-comments", kwargs={"post_uuid": self.post_private.uuid})
+        self.private_comment_url = reverse("comment-detail", kwargs={"comment_uuid": self.comment_to_private.uuid})
+        self.public_comment_url = reverse("comment-detail", kwargs={"comment_uuid": self.comment_to_public.uuid})
     
     def test_staff_can_read_all_and_delete_but_not_edit(self):
 
@@ -73,11 +74,8 @@ class CommentViewSetTest(APITestCase):
     
     def test_stranger_cannot_comment_on_private_post(self):
         self.client.force_authenticate(user=self.stranger)
-        comment_data = {
-            "post": self.post_private.id,  
-            "body": "I am a stranger trying to sneak a comment in!"
-        }
-        comment_response = self.client.post(self.comments_list_url, comment_data)
+        comment_data = {"body": "I am a stranger trying to sneak a comment in!"}
+        comment_response = self.client.post(self.private_comments_list_url, comment_data)
         self.assertEqual(comment_response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_follower_can_comment_but_stranger_cannot_on_followers_only_post(self):
@@ -91,8 +89,8 @@ class CommentViewSetTest(APITestCase):
         # Stranger (not a follower) is blocked
         self.client.force_authenticate(user=self.stranger)
         response = self.client.post(
-            self.comments_list_url,
-            {"post": post_followers.id, "body": "I'm sneaking in!"},
+            reverse("post-comments", kwargs={"post_uuid": post_followers.uuid}),
+            {"body": "I'm sneaking in!"},
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
@@ -109,8 +107,8 @@ class CommentViewSetTest(APITestCase):
         # Follower is allowed
         self.client.force_authenticate(user=follower)
         response = self.client.post(
-            self.comments_list_url,
-            {"post": post_followers.id, "body": "Nice post!"},
+            reverse("post-comments", kwargs={"post_uuid": post_followers.uuid}),
+            {"body": "Nice post!"},
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
@@ -120,14 +118,14 @@ class CommentViewSetTest(APITestCase):
         # Completely empty body
         response = self.client.post(
             self.comments_list_url,
-            {"post": self.post_public.id, "body": ""},
+            {"body": ""},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
         # Whitespace-only body
         response = self.client.post(
             self.comments_list_url,
-            {"post": self.post_public.id, "body": "   "},
+            {"body": "   "},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
@@ -138,9 +136,9 @@ class CommentViewSetTest(APITestCase):
         self.client.force_authenticate(user=self.user)
         response = self.client.post(
             self.comments_list_url,
-            {"post": self.post_public.id, "body": "This post is gone!"},
+            {"body": "This post is gone!"},
         )
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
 
 class CommentReactionTest(APITestCase):
@@ -160,7 +158,7 @@ class CommentReactionTest(APITestCase):
             author=self.user,
             body="Comment to react to",
         )
-        self.react_url = reverse("comments-react-to-comments", kwargs={"pk": self.comment.pk})
+        self.react_url = reverse("comment-react", kwargs={"comment_uuid": self.comment.uuid})
 
     def _fresh_comment(self):
         """Return the comment with up-to-date DB values."""
@@ -259,7 +257,7 @@ class CommentsCountDenormalizationTest(APITestCase):
             description="Post for count tests.",
             visibility=Post.Visibility.PUBLIC,
         )
-        self.comments_list_url = reverse("comments-list")
+        self.comments_list_url = reverse("post-comments", kwargs={"post_uuid": self.post.uuid})
 
     def _fresh_post(self):
         return Post.objects.get(pk=self.post.pk)
@@ -268,19 +266,19 @@ class CommentsCountDenormalizationTest(APITestCase):
         self.client.force_authenticate(user=self.user)
         self.assertEqual(self._fresh_post().comments_count, 0)
 
-        self.client.post(self.comments_list_url, {"post": self.post.id, "body": "First!"})
+        self.client.post(self.comments_list_url, {"body": "First!"})
         self.assertEqual(self._fresh_post().comments_count, 1)
 
-        self.client.post(self.comments_list_url, {"post": self.post.id, "body": "Second!"})
+        self.client.post(self.comments_list_url, {"body": "Second!"})
         self.assertEqual(self._fresh_post().comments_count, 2)
 
     def test_comments_count_decrements_when_comment_is_deleted(self):
         self.client.force_authenticate(user=self.user)
-        self.client.post(self.comments_list_url, {"post": self.post.id, "body": "To be deleted"})
+        self.client.post(self.comments_list_url, {"body": "To be deleted"})
         self.assertEqual(self._fresh_post().comments_count, 1)
 
         comment = Comment.objects.filter(post=self.post).first()
-        delete_url = reverse("comments-detail", kwargs={"pk": comment.pk})
+        delete_url = reverse("comment-detail", kwargs={"comment_uuid": comment.uuid})
         self.client.delete(delete_url)
 
         self.assertEqual(self._fresh_post().comments_count, 0)
@@ -292,7 +290,7 @@ class CommentsCountDenormalizationTest(APITestCase):
         self.assertEqual(self._fresh_post().comments_count, 0)
 
         self.client.force_authenticate(user=self.user)
-        delete_url = reverse("comments-detail", kwargs={"pk": comment.pk})
+        delete_url = reverse("comment-detail", kwargs={"comment_uuid": comment.uuid})
         self.client.delete(delete_url)
 
         self.assertEqual(self._fresh_post().comments_count, 0)
@@ -300,18 +298,18 @@ class CommentsCountDenormalizationTest(APITestCase):
     def test_replies_also_increment_and_decrement_count(self):
         self.client.force_authenticate(user=self.user)
         # Top-level comment via API
-        resp = self.client.post(self.comments_list_url, {"post": self.post.id, "body": "Parent"})
-        parent_id = resp.data["id"]
+        resp = self.client.post(self.comments_list_url, {"body": "Parent"})
+        parent_uuid = resp.data["uuid"]
         self.assertEqual(self._fresh_post().comments_count, 1)
 
         # Reply via API
         resp = self.client.post(
             self.comments_list_url,
-            {"post": self.post.id, "parent": parent_id, "body": "Reply"},
+            {"parent": parent_uuid, "body": "Reply"},
         )
-        reply_id = resp.data["id"]
+        reply_uuid = resp.data["uuid"]
         self.assertEqual(self._fresh_post().comments_count, 2)
 
         # Delete the reply
-        self.client.delete(reverse("comments-detail", kwargs={"pk": reply_id}))
+        self.client.delete(reverse("comment-detail", kwargs={"comment_uuid": reply_uuid}))
         self.assertEqual(self._fresh_post().comments_count, 1)

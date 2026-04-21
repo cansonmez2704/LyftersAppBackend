@@ -6,6 +6,7 @@ fallback for typo-tolerant, weighted-ranking search.
 
 from django.contrib.postgres.search import SearchQuery, SearchRank, TrigramSimilarity
 from django.db.models import Q, FloatField
+from django.db.models.functions import Coalesce
 from django.db.models.functions import Greatest
 
 from rest_framework import serializers, status
@@ -22,14 +23,24 @@ from workouts.models import Exercise, Workout
 
 
 class UserSearchResultSerializer(serializers.ModelSerializer):
-    
+
     username = serializers.CharField(source="user.username")
     uuid = serializers.UUIDField(source="user.uuid")
     rank = serializers.FloatField(read_only=True)
+    is_public = serializers.BooleanField()
+    bio = serializers.SerializerMethodField()
 
     class Meta:
         model = UserProfile
-        fields = ("uuid", "username", "avatar", "bio", "rank")
+        fields = ("uuid", "username", "avatar", "bio", "is_public", "rank")
+
+    def get_bio(self, obj):
+        request = self.context.get("request")
+        if obj.is_public:
+            return obj.bio
+        if request and request.user.is_authenticated and obj.user_id == request.user.id:
+            return obj.bio
+        return ""
 
 
 class ExerciseSearchResultSerializer(serializers.ModelSerializer):
@@ -61,7 +72,9 @@ def _hybrid_search(queryset, term, search_fields_for_trigram):
     search_query = SearchQuery(term, search_type="websearch")
 
     qs = queryset.annotate(
-        fts_rank=SearchRank("search_vector", search_query),
+        # Celery builds search_vector asynchronously; during local dev it's
+        # common for search_vector to be NULL. Coalesce keeps search working.
+        fts_rank=Coalesce(SearchRank("search_vector", search_query), 0.0),
     )
     primary_field = search_fields_for_trigram[0]
     qs = qs.annotate(
@@ -111,18 +124,17 @@ class GlobalSearchView(APIView):
         if search_type in ("all", "users"):
             user_qs = (
                 UserProfile.objects
-                .filter(Q(is_public=True) | Q(user=request.user))
                 .select_related("user")
-                .exclude(search_vector=None)
             )
             user_results = _hybrid_search(user_qs, term, ["user__username"])
-            results["users"] = UserSearchResultSerializer(user_results, many=True).data
+            results["users"] = UserSearchResultSerializer(
+                user_results, many=True, context={"request": request}
+            ).data
 
         if search_type in ("all", "exercises"):
             exercise_qs = (
                 Exercise.objects
                 .prefetch_related("muscles")
-                .exclude(search_vector=None)
             )
             exercise_results = _hybrid_search(exercise_qs, term, ["name"])
             results["exercises"] = ExerciseSearchResultSerializer(
@@ -137,7 +149,6 @@ class GlobalSearchView(APIView):
                     | Q(owner=request.user)
                 )
                 .select_related("owner__profile")
-                .exclude(search_vector=None)
             )
             workout_results = _hybrid_search(workout_qs, term, ["name"])
             results["workouts"] = WorkoutSearchResultSerializer(

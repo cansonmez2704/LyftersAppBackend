@@ -11,7 +11,14 @@ from rest_framework.views import APIView
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken, OutstandingToken, BlacklistedToken, TokenError
 from .models import UserProfile, UserFollower
-from .serializers import UserRegisterSerializer, FullUserProfileSerializer, MiniUserProfileSerializer, ChangePasswordSerializer , OwnProfileSerializer
+from .serializers import (
+    UserRegisterSerializer,
+    FullUserProfileSerializer,
+    MiniUserProfileSerializer,
+    ChangePasswordSerializer,
+    OwnProfileSerializer,
+    IncomingFollowRequestSerializer,
+)
 from common.pagination import FeedCursorPagination
 from common.follow import toggle_follow
 
@@ -248,6 +255,59 @@ class FollowingListView(generics.ListAPIView):
                 user__incoming_followers__status=UserFollower.FollowStatus.ACCEPTED,
             )
             .select_related("user")
+        )
+
+
+class SuggestionsView(generics.ListAPIView):
+    """
+    Lightweight "people you may want to follow" endpoint.
+
+    MVP logic:
+    - only public profiles
+    - exclude self
+    - exclude anyone already followed or requested by the caller
+    - rank by follower count (desc) then recency (desc)
+    """
+
+    serializer_class = MiniUserProfileSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def get_queryset(self):
+        limit = int(self.request.query_params.get("limit", 8))
+        limit = max(1, min(limit, 50))
+
+        excluded_user_ids = UserFollower.objects.filter(
+            from_user=self.request.user,
+        ).values_list("to_user_id", flat=True)
+
+        return (
+            UserProfile.objects
+            .exclude(user=self.request.user)
+            .exclude(user_id__in=excluded_user_ids)
+            .select_related("user")
+            .order_by("-followers_count", "-updated_at")[:limit]
+        )
+
+
+class IncomingFollowRequestsView(generics.ListAPIView):
+    """
+    Pending follow requests *to* the current user (for private accounts).
+    """
+
+    serializer_class = IncomingFollowRequestSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = FeedCursorPagination
+
+    def get_queryset(self):
+        return (
+            UserFollower.objects
+            .filter(
+                to_user=self.request.user,
+                status=UserFollower.FollowStatus.PENDING,
+            )
+            .select_related("from_user__profile", "from_user")
+            .order_by("-created_at")
         )
 
         

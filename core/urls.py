@@ -31,6 +31,8 @@ urlpatterns = [
 ]
 
 if settings.DEBUG:
+    from django.conf.urls.static import static
+
     urlpatterns += [
         # allauth's HTML flows (login pages, email confirmation links) are only
         # useful in dev — production traffic uses the JWT endpoints under /api/v1/auth/.
@@ -38,3 +40,6 @@ if settings.DEBUG:
         path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
         path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     ]
+    # Serve uploaded media files (avatars, post images/videos) during local dev.
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
