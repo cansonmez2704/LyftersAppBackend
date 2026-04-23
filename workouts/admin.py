@@ -34,13 +34,13 @@ class ExerciseAdmin(admin.ModelAdmin):
 
 @admin.register(Workout)
 class WorkoutAdmin(admin.ModelAdmin):
-    list_display   = ("name", "owner", "visibility", "is_template", "created_at")
-    list_filter    = ("visibility", "is_template")
+    list_display   = ("name", "owner", "visibility",  "created_at")
+    list_filter    = ("visibility",)
     search_fields  = ("name", "description", "owner__username")
     readonly_fields = ("created_at", "updated_at")
     inlines        = [WorkoutExerciseInline]
     fieldsets = (
         ("Info", {"fields": ("owner", "name", "description", "cover_image")}),
-        ("Settings", {"fields": ("visibility", "estimated_duration_min", "is_template")}),
+        ("Settings", {"fields": ("visibility", "estimated_duration_min")}),
         ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
     )

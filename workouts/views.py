@@ -1,4 +1,5 @@
 from django.db.models import Q
+from django.contrib.postgres.search import SearchQuery, SearchRank
 from rest_framework.viewsets import ModelViewSet
 from rest_framework import permissions
 
@@ -40,18 +41,26 @@ class WorkoutViewSet(ModelViewSet):
     def get_queryset(self):
         queryset = Workout.objects.select_related("owner__profile")
 
-        # Only pull the exercise/set/muscle tree when the detail view needs it.
-        # List views get the minimal serializer above, so this prefetch would
-        # be ~2400 related rows per request on a power user's workout list.
         if self.action in ('retrieve', 'update', 'partial_update'):
             queryset = queryset.prefetch_related(
                 "workout_exercises__exercise__muscles",
                 "workout_exercises__sets",
             )
 
-        if self.request.user.is_staff:
-            return queryset
+        # Base visibility filtering
+        if not self.request.user.is_staff:
+            queryset = queryset.filter(
+                Q(owner=self.request.user) | Q(visibility=Workout.Visibility.PUBLIC)
+            )
 
-        return queryset.filter(
-            Q(owner=self.request.user) | Q(visibility=Workout.Visibility.PUBLIC)
-        )
+        # ADDED: The Search Engine Integration
+        search_term = self.request.query_params.get('q', None)
+        if search_term:
+            query = SearchQuery(search_term)
+            queryset = queryset.filter(
+                search_vector=query
+            ).annotate(
+                rank=SearchRank('search_vector', query)
+            ).order_by('-rank') # Overrides default ordering to show most relevant first
+
+        return queryset

@@ -250,6 +250,60 @@ class WorkoutViewSetTests(APITestCase):
         new_workout = Workout.objects.get(name="Full Stack Workout")
         self.assertEqual(new_workout.workout_exercises.count(), 1)
         self.assertEqual(new_workout.workout_exercises.first().sets.count(), 2)
+    
+
+
+    def test_update_workout_with_nested_data(self):
+        """Test the advanced Sync/Merge engine in the serializer."""
+        self.client.force_authenticate(user=self.user)
+        
+        # We will PATCH the push_day workout created in setUp
+        payload = {
+            "name": "Modified Push Day",
+            "workout_exercises": [
+                {
+                    "id": self.workout_bench.id, # Sending the ID triggers the UPDATE logic
+                    "exercise": self.bench_press.id,
+                    "order": 1, # Changed from 0 to 1
+                    "notes": "Updated notes!",
+                    "sets": [
+                        # Deleting the 3rd set, keeping 2, changing the weight
+                        {"set_number": 1, "reps": 10, "weight": 145, "weight_unit": "LBS"},
+                        {"set_number": 2, "reps": 8, "weight": 195, "weight_unit": "LBS"}
+                    ]
+                }
+            ]
+        }
+        
+        response = self.client.patch(self.workouts_detail_url, payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify the DB actually synced
+        self.push_day.refresh_from_db()
+        self.assertEqual(self.push_day.name, "Modified Push Day")
+        
+        # We should still only have 1 exercise, but now it only has 2 sets
+        exercise_in_db = self.push_day.workout_exercises.first()
+        self.assertEqual(exercise_in_db.order, 1)
+        self.assertEqual(exercise_in_db.sets.count(), 2)
+    
+
+    def test_workout_search_endpoint(self):
+        """Test that the PostgreSQL Search endpoint processes queries without crashing."""
+        self.client.force_authenticate(user=self.user)
+        
+        # We simulate the search task since Celery isn't running in the test environment
+        from workouts.tasks import rebuild_workout_search_vector
+        rebuild_workout_search_vector(self.push_day.pk)
+        
+        # Hit the search endpoint
+        search_url = f"{self.workouts_list_url}?q=Heavy"
+        response = self.client.get(search_url)
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Verify our push day showed up in the results
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['name'], "Heavy Push Day")
 
 
 

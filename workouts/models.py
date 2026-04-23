@@ -3,10 +3,14 @@ import uuid as uuid_lib
 from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector, SearchVectorField
+from django.contrib.postgres.fields import ArrayField
 from django.db import models, transaction
 from django.db.models import Q , F
-from django.db.models.signals import post_save, m2m_changed
+from django.db.models.signals import post_save, m2m_changed , post_delete
 from django.dispatch import receiver
+from django.db import transaction
+from django.core.validators import MinValueValidator
+from decimal import Decimal
 
 class MuscleGroup(models.Model):
 
@@ -41,7 +45,7 @@ class Exercise(models.Model):
         max_length=20,
         choices=ExerciseType.choices,
         default=ExerciseType.WEIGHTLIFTING,
-        db_index=True,
+       
     )
     movement_type = models.CharField(
         max_length=20,
@@ -71,12 +75,13 @@ class Exercise(models.Model):
         default="",
         help_text="Link to a demo video.",
     )
-    equipment_needed = models.CharField(
-        max_length=200,
+    equipment_needed = ArrayField(
+        models.CharField(max_length=50),
         blank=True,
-        default="",
-        help_text="e.g. 'Barbell, Bench' or 'Bodyweight'.",
+        default=list,
+        help_text="List of required equipment, e.g., ['barbell', 'bench']"
     )
+    
     uuid = models.UUIDField(
         default=uuid_lib.uuid4,
         editable=False,
@@ -132,11 +137,7 @@ class Workout(models.Model):
         blank=True,
         help_text="Estimated duration in minutes.",
     )
-    is_template = models.BooleanField(
-        default=False,
-        db_index=True,
-        help_text="Reusable template that others can copy.",
-    )
+    
     uuid = models.UUIDField(default=uuid_lib.uuid4, editable=False, unique=True, db_index=True)
     search_vector = SearchVectorField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -181,7 +182,7 @@ class WorkoutExercise(models.Model):
         verbose_name_plural = "Workout Exercises"
         constraints = [
             models.UniqueConstraint(
-                fields=["workout", "exercise", "order"],
+                fields=["workout", "order"],
                 name="unique_exercise_order_per_workout",
             ),
         ]
@@ -211,6 +212,7 @@ class WorkoutSet(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
+        validators=[MinValueValidator(Decimal('0.00'))], # ADD THIS
         help_text="Weight lifted in the specified unit.",
     )
     weight_unit = models.CharField(
@@ -225,6 +227,11 @@ class WorkoutSet(models.Model):
         blank=True,
         help_text="Duration in seconds (cardio / isometric).",
     )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
     class Meta:
         ordering = ["set_number"]
         verbose_name = "Workout Set"
@@ -254,19 +261,26 @@ def update_exercise_search_vector(sender, instance, **kwargs):
         lambda: rebuild_exercise_search_vector.delay(instance.pk)
     )
 
-
 @receiver(m2m_changed, sender=Exercise.muscles.through)
-def update_exercise_search_vector_on_m2m(sender, instance, **kwargs):
+def update_exercise_search_vector_on_m2m(sender, instance, action, **kwargs):
     """Also rebuild when muscles are added/removed."""
-    from workouts.tasks import rebuild_exercise_search_vector
-    transaction.on_commit(
-        lambda: rebuild_exercise_search_vector.delay(instance.pk)
-    )
+    # ADDED THE ACTION CHECK: Prevents Celery from queueing duplicate tasks.
+    if action in ["post_add", "post_remove", "post_clear"]:
+        from workouts.tasks import rebuild_exercise_search_vector
+        transaction.on_commit(
+            lambda: rebuild_exercise_search_vector.delay(instance.pk)
+        )
 
+# REMOVED the "from .models import WorkoutExercise" because we are already in models.py!
+from workouts.tasks import rebuild_workout_search_vector
 
-@receiver(post_save, sender=Workout)
-def update_workout_search_vector(sender, instance, **kwargs):
-    from workouts.tasks import rebuild_workout_search_vector
+# COMBINED decorators to fix your IDE yellow line
+@receiver([post_save, post_delete], sender=WorkoutExercise)
+def update_workout_search_vector_on_exercise_change(sender, instance, **kwargs):
+    """
+    If an exercise is added to, updated in, or removed from a workout,
+    rebuild the parent workout's search vector to keep the index fresh.
+    """
     transaction.on_commit(
-        lambda: rebuild_workout_search_vector.delay(instance.pk)
+        lambda: rebuild_workout_search_vector.delay(instance.workout_id)
     )
