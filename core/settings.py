@@ -127,11 +127,15 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.UserRateThrottle',   
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/hour',        
-        'user': '1000/hour',       
-        'reaction_spam': '20/min', 
+        'anon': '100/hour',
+        'user': '1000/hour',
+        'reaction_spam': '20/min',
         'search': '30/min',
-        'strict_auth': '5/min', 
+        'strict_auth': '5/min',
+        # Follow/accept/reject take row-level locks on two UserProfile rows
+        # each call. Rate-limit them to stop a single authenticated client
+        # from holding locks in a tight loop or flooding the FTS signal path.
+        'social_write': '60/min',
     }
 }
 
@@ -291,7 +295,6 @@ CELERY_TASK_TIME_LIMIT = 330
 
 CELERY_TASK_ROUTES = {
     'community.tasks.process_post_media': {'queue': 'media'},
-    'users.tasks.resize_avatar':          {'queue': 'media'},
     'community.tasks.purge_*':            {'queue': 'maintenance'},
     'common.tasks.reconcile_counters':    {'queue': 'maintenance'},
     '*':                                   {'queue': 'default'},

@@ -1,53 +1,18 @@
 """
 Celery tasks for the users app.
-- Avatar resizing after upload
 - Profile search vector rebuilds
 - Bulk token blacklisting after password change
+
+Avatar processing is intentionally NOT here: it happens synchronously inside
+the request handler (see `users.serializers.process_avatar_upload`) so that
+EXIF stripping, resizing, and WebP conversion are guaranteed before a byte
+ever lands in S3.
 """
 import logging
-from io import BytesIO
 
 from celery import shared_task
-from django.core.files.base import ContentFile
 
 logger = logging.getLogger(__name__)
-
-
-@shared_task(bind=True, max_retries=3, default_retry_delay=10)
-def resize_avatar(self, profile_id, max_size=400):
-    """Resize an uploaded avatar to max_size × max_size pixels."""
-    try:
-        from PIL import Image
-        from .models import UserProfile
-
-        profile = UserProfile.objects.get(pk=profile_id)
-        if not profile.avatar:
-            return "No avatar to resize"
-
-        img = Image.open(profile.avatar)
-
-        if img.width <= max_size and img.height <= max_size:
-            return "Avatar already within size limits"
-
-        img.thumbnail((max_size, max_size), Image.LANCZOS)
-
-        buffer = BytesIO()
-        img_format = img.format or "JPEG"
-        img.save(buffer, format=img_format, quality=85)
-        buffer.seek(0)
-
-        # Save back without triggering signals again
-        file_name = profile.avatar.name.split("/")[-1]
-        profile.avatar.save(file_name, ContentFile(buffer.read()), save=False)
-        UserProfile.objects.filter(pk=profile_id).update(avatar=profile.avatar.name)
-
-        return f"Resized avatar for profile {profile_id} to {max_size}x{max_size}"
-
-    except UserProfile.DoesNotExist:
-        return f"Profile {profile_id} not found"
-    except Exception as exc:
-        logger.error(f"Avatar resize failed for profile {profile_id}: {exc}")
-        raise self.retry(exc=exc)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=5)
@@ -70,7 +35,7 @@ def rebuild_profile_search_vector(self, user_pk):
         return f"Search vector rebuilt for user {user_pk}"
 
     except Exception as exc:
-        logger.error(f"Search vector rebuild failed for user {user_pk}: {exc}")
+        logger.exception("Search vector rebuild failed for user %s", user_pk)
         raise self.retry(exc=exc)
 
 
