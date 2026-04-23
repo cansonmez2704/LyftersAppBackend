@@ -16,7 +16,7 @@ from core.throttles import ReactionSpamThrottle
 
 from common.permissions import IsOwnerOrReadOnly, IsAuthorOnly, IsOwnerOrAdmin, CanCommentOnPost
 from common.reactions import toggle_reaction
-from common.pagination import FeedCursorPagination, CommentLimitOffsetPagination
+from common.pagination import FeedCursorPagination, PopularFeedCursorPagination, CommentLimitOffsetPagination
 
 
 from .serializers import (
@@ -289,34 +289,76 @@ class CommentViewSet(ModelViewSet):
 
 
 class FeedView(ListAPIView):
-    """Personalized timeline: posts authored by the current user or by users
-    they follow (accepted). Differs from `PostViewSet.list`, which applies
-    global visibility filters but does not restrict by follow graph."""
+    """Blended feed: posts from followed users, own posts, and all public
+    posts.  Supports two ordering modes via ``?ordering=`` query param:
+
+    * ``recent`` (default) — reverse-chronological, cursor on ``created_at``.
+    * ``popular`` — engagement-ranked (``likes_count`` DESC, ``created_at``
+      DESC as tiebreaker), cursor on ``(likes_count, created_at)``.
+
+    Both modes are backed by composite B-tree indexes so Postgres can satisfy
+    the full ORDER BY + WHERE from a single index scan even at millions of
+    rows.
+
+    The combined ``Q(followed) | Q(own) | Q(public)`` filter produces a
+    single WHERE clause with OR predicates — no JOINs that could multiply
+    rows — so ``DISTINCT`` is unnecessary.
+    """
 
     serializer_class = PostListSerializer
-    pagination_class = FeedCursorPagination
     permission_classes = [permissions.IsAuthenticated]
 
+    # Dynamic: overridden in ``get_pagination_class`` based on query param.
+    pagination_class = FeedCursorPagination
+
+    _VALID_ORDERINGS = frozenset({"recent", "popular"})
+
+    @property
+    def paginator(self):
+        """Switch pagination class (and therefore cursor ordering) based on
+        the ``?ordering`` query param.  DRF caches ``self._paginator`` after
+        the first call, so the branch is evaluated once per request."""
+        if not hasattr(self, "_paginator"):
+            mode = self.request.query_params.get("ordering", "recent")
+            if mode == "popular":
+                self._paginator = PopularFeedCursorPagination()
+            else:
+                self._paginator = FeedCursorPagination()
+        return self._paginator
+
     def get_queryset(self):
-        if self.request.user.is_staff:
-            return (
-                Post.objects.filter(is_deleted=False)
+        user = self.request.user
+
+        if user.is_staff:
+            qs = (
+                Post.objects
+                .filter(is_deleted=False)
                 .select_related("author", "author__profile")
                 .prefetch_related("media")
-                .order_by("-created_at")
+            )
+        else:
+            following_ids = (
+                UserFollower.objects
+                .filter(
+                    from_user=user,
+                    status=UserFollower.FollowStatus.ACCEPTED,
+                )
+                .values("to_user_id")
             )
 
-        following_ids = UserFollower.objects.filter(
-            from_user=self.request.user,
-            status=UserFollower.FollowStatus.ACCEPTED,
-        ).values("to_user")
-
-        return (
-            Post.objects.filter(
-                Q(author_id__in=following_ids) | Q(author=self.request.user),
-                is_deleted=False,
+            qs = (
+                Post.objects
+                .filter(
+                    Q(author_id__in=following_ids)
+                    | Q(author=user)
+                    | Q(visibility=Post.Visibility.PUBLIC),
+                    is_deleted=False,
+                )
+                .select_related("author__profile")
+                .prefetch_related("media")
             )
-            .select_related("author__profile")
-            .prefetch_related("media")
-            .order_by("-created_at")
-        )
+
+        mode = self.request.query_params.get("ordering", "recent")
+        if mode == "popular":
+            return qs.order_by("-likes_count", "-created_at")
+        return qs.order_by("-created_at")

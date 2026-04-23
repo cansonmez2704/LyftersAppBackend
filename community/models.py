@@ -116,6 +116,10 @@ class Post(models.Model):
             models.Index(fields=["author", "-created_at"]),
             models.Index(fields=["visibility", "is_archived", "-created_at"]),
             models.Index(fields=["post_type", "-created_at"]),
+            models.Index(
+                fields=["is_deleted", "visibility", "-likes_count", "-created_at"],
+                name="feed_popular_idx",
+            ),
         ]
 
     def save(self, *args, **kwargs):

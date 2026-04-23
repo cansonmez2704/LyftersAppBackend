@@ -8,6 +8,7 @@ from .views import (
     FollowerListView, FollowingListView,
     SuggestionsView,
     IncomingFollowRequestsView,
+    GoogleLoginView, GoogleClientIdView,
 )
 
 
@@ -28,6 +29,10 @@ urlpatterns = [
     path("sign-up/", RegisterView.as_view(), name="sign-up"),
     path("log-out/", LogoutView.as_view(), name="logout"),
     path("change-password/", ChangePasswordView.as_view(), name="change-password"),
+
+    # Google OAuth2
+    path("auth/google/", GoogleLoginView.as_view(), name="google-login"),
+    path("auth/google/client-id/", GoogleClientIdView.as_view(), name="google-client-id"),
 
     # Profile
     path("my-profile/", MyProfileView.as_view(), name="my-profile"),

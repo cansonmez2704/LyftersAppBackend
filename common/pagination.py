@@ -1,8 +1,15 @@
 from rest_framework.pagination import CursorPagination, LimitOffsetPagination
 
+
 class FeedCursorPagination(CursorPagination):
-    ordering = '-created_at' 
+    ordering = '-created_at'
     page_size = 20
+
+
+class PopularFeedCursorPagination(CursorPagination):
+    ordering = ('-likes_count', '-created_at')
+    page_size = 20
+
 
 class CommentLimitOffsetPagination(LimitOffsetPagination):
     default_limit = 20

@@ -6,13 +6,13 @@ from django.db import transaction
 class MuscleGroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = MuscleGroup
-        fields = ("id","name","description")
+        fields = ("id", "name", "slug", "description")
 
 class ExerciseSerializer(serializers.ModelSerializer):
     muscles = MuscleGroupSerializer(many=True,read_only=True)
     class Meta:
         model = Exercise
-        fields = ("id","name","description","exercise_type","movement_type","difficulty","muscles","instructions","video_url","equipment_needed","created_at","updated_at")
+        fields = ("id", "uuid", "name", "slug", "description", "exercise_type", "movement_type", "difficulty", "muscles", "instructions", "video_url", "equipment_needed", "created_at", "updated_at")
 
 class WorkoutSetSerializer(serializers.ModelSerializer):
     class Meta:

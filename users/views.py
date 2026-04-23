@@ -13,6 +13,10 @@ from rest_framework.views import APIView
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
+from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
+from allauth.socialaccount.providers.oauth2.client import OAuth2Client
+from dj_rest_auth.registration.views import SocialLoginView
+
 from common.follow import toggle_follow
 from common.pagination import FeedCursorPagination
 from common.utils import lock_profiles_for_update
@@ -30,6 +34,41 @@ from .serializers import (
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
+
+
+class GoogleLoginView(SocialLoginView):
+    """
+    POST { "code": "<authorization_code>", "redirect_uri": "..." }
+    Exchanges a Google authorization code for JWT tokens.
+    dj-rest-auth handles user creation/linking via allauth internally.
+    """
+    adapter_class = GoogleOAuth2Adapter
+    client_class = OAuth2Client
+
+    @property
+    def callback_url(self):
+        return self.request.data.get(
+            "redirect_uri",
+            self.request.META.get("HTTP_ORIGIN", "http://localhost:5173")
+            + "/auth/google/callback",
+        )
+
+
+class GoogleClientIdView(APIView):
+    """Returns the Google OAuth client_id so the SPA can build the consent URL
+    without hardcoding secrets in the frontend bundle."""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from allauth.socialaccount.models import SocialApp
+        try:
+            app = SocialApp.objects.get(provider="google")
+            return Response({"client_id": app.client_id})
+        except SocialApp.DoesNotExist:
+            return Response(
+                {"error": "Google OAuth is not configured."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
 
 def _client_ip(request) -> str:
