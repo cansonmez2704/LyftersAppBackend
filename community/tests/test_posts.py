@@ -48,6 +48,11 @@ class PostViewSetTest(APITestCase):
             visibility=Post.Visibility.PRIVATE
         )
 
+        # Fixture posts are inserted directly via .objects.create(), bypassing
+        # the view's moderation dispatch. Mark them as published so visibility
+        # tests below behave the same as before the moderation rollout.
+        Post.objects.update(moderation_status="published")
+
         self.post_list_url = reverse("posts-list")
         self.public_post_url = reverse("posts-detail", kwargs={"uuid": self.public_post.uuid})
         self.private_post_url = reverse("posts-detail",kwargs={"uuid":self.private_post.uuid})
@@ -168,6 +173,8 @@ class PostReactionTests(APITestCase):
             description="A post to react to",
             visibility=Post.Visibility.PUBLIC
         )
+        Post.objects.update(moderation_status="published")
+        self.post.refresh_from_db()
 
         self.react_url = reverse("posts-react-to-posts", kwargs={"uuid": self.post.uuid})
 
@@ -254,6 +261,8 @@ class PostReactionListTests(APITestCase):
             description="A post to list reactions on",
             visibility=Post.Visibility.PUBLIC
         )
+        Post.objects.update(moderation_status="published")
+        self.post.refresh_from_db()
 
         self.reactions_url = reverse("posts-reactions", kwargs={"uuid": self.post.uuid})
 

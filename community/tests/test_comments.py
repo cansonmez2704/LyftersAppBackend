@@ -53,6 +53,11 @@ class CommentViewSetTest(APITestCase):
             body="This is a reply to the first comment"
         )
 
+        # Fixtures bypass the view's moderation dispatch — grandfather them
+        # to published so visibility tests don't trip the new filter.
+        Post.objects.update(moderation_status="published")
+        Comment.objects.update(moderation_status="published")
+
         self.comments_list_url = reverse("post-comments", kwargs={"post_uuid": self.post_public.uuid})
         self.private_comments_list_url = reverse("post-comments", kwargs={"post_uuid": self.post_private.uuid})
         self.private_comment_url = reverse("comment-detail", kwargs={"comment_uuid": self.comment_to_private.uuid})
@@ -158,6 +163,8 @@ class CommentReactionTest(APITestCase):
             author=self.user,
             body="Comment to react to",
         )
+        Post.objects.update(moderation_status="published")
+        Comment.objects.update(moderation_status="published")
         self.react_url = reverse("comment-react", kwargs={"comment_uuid": self.comment.uuid})
 
     def _fresh_comment(self):
@@ -257,6 +264,7 @@ class CommentsCountDenormalizationTest(APITestCase):
             description="Post for count tests.",
             visibility=Post.Visibility.PUBLIC,
         )
+        Post.objects.update(moderation_status="published")
         self.comments_list_url = reverse("post-comments", kwargs={"post_uuid": self.post.uuid})
 
     def _fresh_post(self):

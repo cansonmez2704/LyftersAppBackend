@@ -5,6 +5,7 @@ from django.utils.text import slugify
 from django.core.validators import FileExtensionValidator, MaxLengthValidator
 from django.core.exceptions import ValidationError
 from common.validators import validate_media_size, validate_real_content_type
+from common.moderation import Moderatable
 
 POST_DESCRIPTION_MAX_LENGTH = 5000
 
@@ -28,8 +29,8 @@ def post_cover_upload_path(instance, filename):
 # Post
 # ---------------------------------------------------------------------------
 
-class Post(models.Model):
-   
+class Post(Moderatable, models.Model):
+
 
     class Visibility(models.TextChoices):
         PUBLIC    = "public",    "Public"
@@ -141,8 +142,14 @@ class Post(models.Model):
 
     @property
     def reaction_score(self) -> int:
-     
+
         return self.likes_count - self.dislikes_count
+
+    def get_moderation_text(self) -> str:
+        # Title and description are the only user-supplied free text on a
+        # Post. Cover images and attached media are handled by a different
+        # moderation surface (image classification) and are out of scope here.
+        return "\n".join(filter(None, [self.title, self.description]))
 
 
 class PostMedia(models.Model):
@@ -206,9 +213,9 @@ class PostMedia(models.Model):
 
 
 
-class Comment(models.Model):
-   
-    
+class Comment(Moderatable, models.Model):
+
+
     post   = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="comments")
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -280,6 +287,9 @@ class Comment(models.Model):
     @property
     def is_reply(self) -> bool:
         return self.parent_id is not None
+
+    def get_moderation_text(self) -> str:
+        return self.body or ""
 
 class ReactionType(models.TextChoices):
         LIKE    = "like",    "Like"

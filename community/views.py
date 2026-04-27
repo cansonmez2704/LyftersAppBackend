@@ -2,6 +2,9 @@ from django.db import transaction
 from django.db.models import Q, F, Value, Prefetch
 from django.db.models.functions import Greatest
 from django.shortcuts import get_object_or_404
+from django.contrib.contenttypes.models import ContentType
+
+from common.moderation import ModerationStatus
 
 
 from rest_framework.viewsets import ModelViewSet
@@ -142,18 +145,29 @@ class PostViewSet(ModelViewSet):
         if self.request.user.is_staff:
             queryset = base_queryset
         elif self.request.user.is_authenticated:
-            # Subquery-based visibility filter — avoids the M2M join that would
-            # otherwise duplicate rows when the author has many followers.
+            # Visibility filter combines two orthogonal axes:
+            #   1. Audience (PUBLIC / FOLLOWERS / PRIVATE) — who's allowed.
+            #   2. Moderation (PENDING / PUBLISHED / REJECTED) — author always
+            #      sees their own (Twitter/Instagram pattern), everyone else
+            #      only sees PUBLISHED.
             queryset = base_queryset.filter(
                 Q(author=self.request.user)
-                | Q(visibility=Post.Visibility.PUBLIC)
-                | Q(
-                    visibility=Post.Visibility.FOLLOWERS,
-                    author_id__in=_visible_author_ids(self.request.user),
+                | (
+                    (
+                        Q(visibility=Post.Visibility.PUBLIC)
+                        | Q(
+                            visibility=Post.Visibility.FOLLOWERS,
+                            author_id__in=_visible_author_ids(self.request.user),
+                        )
+                    )
+                    & Q(moderation_status=ModerationStatus.PUBLISHED)
                 )
             )
         else:
-            queryset = base_queryset.filter(visibility=Post.Visibility.PUBLIC)
+            queryset = base_queryset.filter(
+                visibility=Post.Visibility.PUBLIC,
+                moderation_status=ModerationStatus.PUBLISHED,
+            )
 
         if self.action == 'retrieve':
             # Comments and reactions live on their own paginated endpoints —
@@ -229,13 +243,21 @@ class CommentViewSet(ModelViewSet):
         if self.request.user.is_staff or self.request.user.is_superuser:
             base = queryset
         else:
-            # Subquery avoids row duplication from the M2M follower join.
+            # Same audience + moderation pattern as PostViewSet.get_queryset —
+            # the comment author sees their own pending comment, no one else
+            # does. Parent post must also be PUBLISHED for non-author readers.
             base = queryset.filter(
-                Q(post__visibility=Post.Visibility.PUBLIC)
-                | Q(post__author=self.request.user)
-                | Q(
-                    post__visibility=Post.Visibility.FOLLOWERS,
-                    post__author_id__in=_visible_author_ids(self.request.user),
+                Q(author=self.request.user)
+                | (
+                    (
+                        Q(post__visibility=Post.Visibility.PUBLIC)
+                        | Q(
+                            post__visibility=Post.Visibility.FOLLOWERS,
+                            post__author_id__in=_visible_author_ids(self.request.user),
+                        )
+                    )
+                    & Q(moderation_status=ModerationStatus.PUBLISHED)
+                    & Q(post__moderation_status=ModerationStatus.PUBLISHED)
                 )
             )
 
@@ -259,8 +281,14 @@ class CommentViewSet(ModelViewSet):
             uuid=self.kwargs["post_uuid"],
         )
         self.check_object_permissions(self.request, post)
-        serializer.save(author=self.request.user, post=post)
+        comment = serializer.save(author=self.request.user, post=post)
         Post.objects.filter(pk=post.pk).update(comments_count=F("comments_count") + 1)
+
+        from .tasks import moderate_content
+        comment_ct_id = ContentType.objects.get_for_model(Comment).id
+        transaction.on_commit(
+            lambda cid=comment.pk: moderate_content.delay(comment_ct_id, cid)
+        )
 
     def perform_destroy(self, instance):
         # Atomic conditional soft-delete: only the first delete wins, so the
@@ -346,12 +374,19 @@ class FeedView(ListAPIView):
                 .values("to_user_id")
             )
 
+            # Author sees own pending posts; for everyone else's posts,
+            # only PUBLISHED ones reach the feed.
             qs = (
                 Post.objects
                 .filter(
-                    Q(author_id__in=following_ids)
-                    | Q(author=user)
-                    | Q(visibility=Post.Visibility.PUBLIC),
+                    Q(author=user)
+                    | (
+                        (
+                            Q(author_id__in=following_ids)
+                            | Q(visibility=Post.Visibility.PUBLIC)
+                        )
+                        & Q(moderation_status=ModerationStatus.PUBLISHED)
+                    ),
                     is_deleted=False,
                 )
                 .select_related("author__profile")

@@ -162,7 +162,7 @@ class OwnProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserProfile
-        fields = ("user","avatar","bio","is_public","follow","followers_count","following_count","height","weight","gender","birth_date","posts","workouts")
+        fields = ("user","avatar","bio","is_public","follow","followers_count","following_count","height","weight","gender","birth_date","onboarding_completed","posts","workouts")
 
     def get_follow(self, obj):
         request = self.context.get('request')

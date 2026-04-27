@@ -37,7 +37,7 @@ class PostAdmin(admin.ModelAdmin):
         "is_deleted",
         "created_at",
     )
-    list_filter  = ("post_type", "visibility", "is_pinned", "is_archived", "created_at")
+    list_filter  = ("post_type", "visibility", "is_pinned", "is_archived", "created_at","requires_manual_review")
     search_fields = ("title", "description", "author__username", "slug")
     readonly_fields = (
         "uuid",
@@ -106,7 +106,7 @@ class PostMediaAdmin(admin.ModelAdmin):
 @admin.register(Comment)
 class CommentAdmin(admin.ModelAdmin):
     list_display  = ("short_body", "author", "post", "parent", "likes_count", "dislikes_count", "is_deleted", "created_at")
-    list_filter   = ("is_deleted", "created_at")
+    list_filter   = ("is_deleted", "created_at","requires_manual_review")
     search_fields = ("body", "author__username", "post__title")
     readonly_fields = ("created_at", "updated_at")
     list_editable = ("is_deleted",)

@@ -138,7 +138,9 @@ class UserProfile(models.Model):
     )
     gender = models.CharField(max_length=1, choices=GenderChoices.choices, blank=True, default="")
     birth_date = models.DateField(null=True, blank=True)
-    
+
+    onboarding_completed = models.BooleanField(default=False)
+
     search_vector = SearchVectorField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

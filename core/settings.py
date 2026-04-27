@@ -84,9 +84,20 @@ SOCIALACCOUNT_PROVIDERS = {
         'AUTH_PARAMS': {
             'access_type': 'online',
         },
-        'OAUTH_PKCE_ENABLED': True, 
+        'OAUTH_PKCE_ENABLED': True,
+        # Google always returns verified emails, so we can trust them for
+        # account linking below.
+        'EMAIL_AUTHENTICATION': True,
     }
 }
+
+# If a social login comes in with a verified email that already matches a
+# local user, log that user in instead of returning 400 "email already
+# registered". Auto-connect attaches the SocialAccount row so subsequent
+# Google logins skip the lookup. Safe ONLY because Google verifies emails;
+# never enable this for providers whose email claims aren't verified.
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
 
 LOGIN_REDIRECT_URL = '/admin/' 
 LOGOUT_REDIRECT_URL = '/'
@@ -296,9 +307,22 @@ CELERY_TASK_TIME_LIMIT = 330
 CELERY_TASK_ROUTES = {
     'community.tasks.process_post_media': {'queue': 'media'},
     'community.tasks.purge_*':            {'queue': 'maintenance'},
+    'community.tasks.moderate_content':   {'queue': 'moderation'},
     'common.tasks.reconcile_counters':    {'queue': 'maintenance'},
     '*':                                   {'queue': 'default'},
 }
+
+
+# --- OpenAI Moderation -----------------------------------------------------
+# Key only ever read server-side; never expose to clients or log it.
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODERATION_MODEL = os.getenv("OPENAI_MODERATION_MODEL", "omni-moderation-latest")
+
+# Fail-open: after Celery exhausts retries (OpenAI down for an extended
+# window) we still publish the post and queue it for human review rather
+# than freezing user content. Flip to False to fail-closed if compliance
+# requirements ever demand it.
+MODERATION_FAIL_OPEN = os.getenv("MODERATION_FAIL_OPEN", "True") == "True"
 
 
 from celery.schedules import crontab

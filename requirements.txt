@@ -46,3 +46,6 @@ django-celery-beat>=2.6.0
 # S3 / Cloud Storage
 django-storages>=1.14.0
 boto3>=1.34.0
+
+# Content moderation (OpenAI Moderation API — /v1/moderations)
+openai>=1.40.0

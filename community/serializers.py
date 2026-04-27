@@ -49,6 +49,7 @@ class CommentSerializer(serializers.ModelSerializer):
             "likes_count",
             "dislikes_count",
             "is_deleted",
+            "moderation_status",
             "created_at",
             "updated_at",
         )
@@ -59,6 +60,7 @@ class CommentSerializer(serializers.ModelSerializer):
             "likes_count",
             "dislikes_count",
             "is_deleted",
+            "moderation_status",
             "created_at",
             "updated_at",
         )
@@ -104,11 +106,12 @@ class PostListSerializer(serializers.ModelSerializer):
         fields = (
             "id", "uuid", "author", "title", "description",
             "cover_image", "post_type", "visibility", "media", "likes_count",
-            "dislikes_count", "comments_count", "created_at", "updated_at",
+            "dislikes_count", "comments_count", "moderation_status",
+            "created_at", "updated_at",
         )
         read_only_fields = (
             "id", "uuid", "author", "likes_count",
-            "dislikes_count", "comments_count",
+            "dislikes_count", "comments_count", "moderation_status",
             "created_at", "updated_at",
         )
 
@@ -179,21 +182,40 @@ class PostWriteSerializer(serializers.ModelSerializer):
             media_objs = [PostMedia(post=post, **item) for item in media_data]
             created = PostMedia.objects.bulk_create(media_objs)
 
-            from .tasks import process_post_media
+            from .tasks import moderate_content, process_post_media
+            from django.contrib.contenttypes.models import ContentType
             for media in created:
                 if media.pk and media.media_type == PostMedia.MediaType.IMAGE:
                     transaction.on_commit(
                         lambda mid=media.pk: process_post_media.delay(mid)
                     )
 
+            # Dispatch moderation only on_commit so the task never sees
+            # an uncommitted Post (race on read replicas / pgbouncer).
+            post_ct_id = ContentType.objects.get_for_model(Post).id
+            transaction.on_commit(
+                lambda pid=post.pk: moderate_content.delay(post_ct_id, pid)
+            )
+
             return post
 
     def update(self, instance, validated_data):
         with transaction.atomic():
             media_data = validated_data.pop("media", None)
+            text_changed = any(k in validated_data for k in ("title", "description"))
             for attr, value in validated_data.items():
                 setattr(instance, attr, value)
+
+            # If user-supplied text was edited, re-moderate. Reset to
+            # PENDING and let the queryset filter hide it from non-authors
+            # until the task runs — same UX as initial post.
+            if text_changed:
+                from common.moderation import ModerationStatus
+                instance.moderation_status = ModerationStatus.PENDING
+                instance.moderated_at = None
+
             instance.save()
+
             if media_data is not None:
                 instance.media.all().delete()
                 created = PostMedia.objects.bulk_create([
@@ -206,4 +228,12 @@ class PostWriteSerializer(serializers.ModelSerializer):
                         transaction.on_commit(
                             lambda mid=media.pk: process_post_media.delay(mid)
                         )
+
+            if text_changed:
+                from .tasks import moderate_content
+                from django.contrib.contenttypes.models import ContentType
+                post_ct_id = ContentType.objects.get_for_model(Post).id
+                transaction.on_commit(
+                    lambda pid=instance.pk: moderate_content.delay(post_ct_id, pid)
+                )
             return instance
