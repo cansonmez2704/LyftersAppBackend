@@ -65,6 +65,16 @@ def moderate_text(text: str) -> ModerationResponse:
     )
 
 
+def reset_client() -> None:
+    """Discard the cached OpenAI client.
+
+    Call this after rotating ``OPENAI_API_KEY`` at runtime, or inside test
+    ``setUp`` / ``tearDown`` so ``@override_settings`` takes effect.
+    """
+    global _client
+    _client = None
+
+
 def _to_dict(obj: Any) -> dict[str, Any]:
     if obj is None:
         return {}

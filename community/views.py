@@ -284,11 +284,34 @@ class CommentViewSet(ModelViewSet):
         comment = serializer.save(author=self.request.user, post=post)
         Post.objects.filter(pk=post.pk).update(comments_count=F("comments_count") + 1)
 
-        from .tasks import moderate_content
+        from .tasks import dispatch_moderation
         comment_ct_id = ContentType.objects.get_for_model(Comment).id
         transaction.on_commit(
-            lambda cid=comment.pk: moderate_content.delay(comment_ct_id, cid)
+            lambda cid=comment.pk: dispatch_moderation(comment_ct_id, cid)
         )
+
+    def perform_update(self, serializer):
+        """Re-moderate when the comment body changes.
+
+        Same pattern as PostWriteSerializer.update: reset to PENDING so the
+        visibility filter hides it from non-authors until the Celery task
+        re-screens the new text.
+        """
+        old_body = serializer.instance.body
+        comment = serializer.save()
+
+        if comment.body != old_body:
+            from common.moderation import ModerationStatus
+            Comment.objects.filter(pk=comment.pk).update(
+                moderation_status=ModerationStatus.PENDING,
+                moderated_at=None,
+            )
+
+            from .tasks import dispatch_moderation
+            comment_ct_id = ContentType.objects.get_for_model(Comment).id
+            transaction.on_commit(
+                lambda cid=comment.pk: dispatch_moderation(comment_ct_id, cid)
+            )
 
     def perform_destroy(self, instance):
         # Atomic conditional soft-delete: only the first delete wins, so the

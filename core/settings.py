@@ -340,6 +340,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'common.tasks.reconcile_counters',
         'schedule': crontab(hour='*/6', minute=30),
     },
+    'escalate-manual-review': {
+        'task': 'common.tasks.escalate_manual_review',
+        'schedule': crontab(hour='*/4', minute=45),
+    },
 }
 
 

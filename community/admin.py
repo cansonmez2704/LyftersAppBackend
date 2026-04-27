@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from django.utils import timezone
 
 from .models import Post, PostMedia, Comment, PostReaction, CommentReaction
 
@@ -29,6 +30,8 @@ class PostAdmin(admin.ModelAdmin):
         "author",
         "post_type",
         "visibility",
+        "moderation_status",
+        "requires_manual_review",
         "likes_count",
         "dislikes_count",
         "comments_count",
@@ -37,7 +40,7 @@ class PostAdmin(admin.ModelAdmin):
         "is_deleted",
         "created_at",
     )
-    list_filter  = ("post_type", "visibility", "is_pinned", "is_archived", "created_at","requires_manual_review")
+    list_filter  = ("moderation_status", "requires_manual_review", "post_type", "visibility", "is_pinned", "is_archived", "created_at")
     search_fields = ("title", "description", "author__username", "slug")
     readonly_fields = (
         "uuid",
@@ -45,6 +48,7 @@ class PostAdmin(admin.ModelAdmin):
         "likes_count",
         "dislikes_count",
         "comments_count",
+        "moderated_at",
         "created_at",
         "updated_at",
     )
@@ -56,6 +60,9 @@ class PostAdmin(admin.ModelAdmin):
         }),
         ("Classification", {
             "fields": ("post_type", "visibility", "linked_workout"),
+        }),
+        ("Moderation", {
+            "fields": ("moderation_status", "requires_manual_review", "moderated_at"),
         }),
         ("Flags", {
             "fields": ("is_pinned", "is_archived"),
@@ -91,7 +98,26 @@ class PostAdmin(admin.ModelAdmin):
     def unarchive_posts(self, request, queryset):
         queryset.update(is_archived=False)
 
-    actions = ["pin_posts", "unpin_posts", "archive_posts", "unarchive_posts"]
+    @admin.action(description="✅ Approve selected posts (set PUBLISHED)")
+    def approve_posts(self, request, queryset):
+        queryset.update(
+            moderation_status="published",
+            requires_manual_review=False,
+            moderated_at=timezone.now(),
+        )
+
+    @admin.action(description="❌ Reject selected posts")
+    def reject_posts(self, request, queryset):
+        queryset.update(
+            moderation_status="rejected",
+            requires_manual_review=False,
+            moderated_at=timezone.now(),
+        )
+
+    actions = [
+        "pin_posts", "unpin_posts", "archive_posts", "unarchive_posts",
+        "approve_posts", "reject_posts",
+    ]
 
 
 
@@ -105,17 +131,17 @@ class PostMediaAdmin(admin.ModelAdmin):
 
 @admin.register(Comment)
 class CommentAdmin(admin.ModelAdmin):
-    list_display  = ("short_body", "author", "post", "parent", "likes_count", "dislikes_count", "is_deleted", "created_at")
-    list_filter   = ("is_deleted", "created_at","requires_manual_review")
+    list_display  = ("short_body", "author", "post", "parent", "moderation_status", "requires_manual_review", "likes_count", "dislikes_count", "is_deleted", "created_at")
+    list_filter   = ("moderation_status", "requires_manual_review", "is_deleted", "created_at")
     search_fields = ("body", "author__username", "post__title")
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at", "moderated_at")
     list_editable = ("is_deleted",)
     fieldsets = (
         ("Comment", {
             "fields": ("post", "author", "parent", "body"),
         }),
         ("Moderation", {
-            "fields": ("is_deleted",),
+            "fields": ("moderation_status", "requires_manual_review", "moderated_at", "is_deleted"),
         }),
         ("Engagement (read-only)", {
             "fields": ("likes_count", "dislikes_count"),
@@ -138,7 +164,23 @@ class CommentAdmin(admin.ModelAdmin):
     def restore_comments(self, request, queryset):
         queryset.update(is_deleted=False)
 
-    actions = ["soft_delete_comments", "restore_comments"]
+    @admin.action(description="✅ Approve selected comments (set PUBLISHED)")
+    def approve_comments(self, request, queryset):
+        queryset.update(
+            moderation_status="published",
+            requires_manual_review=False,
+            moderated_at=timezone.now(),
+        )
+
+    @admin.action(description="❌ Reject selected comments")
+    def reject_comments(self, request, queryset):
+        queryset.update(
+            moderation_status="rejected",
+            requires_manual_review=False,
+            moderated_at=timezone.now(),
+        )
+
+    actions = ["soft_delete_comments", "restore_comments", "approve_comments", "reject_comments"]
 
 
 

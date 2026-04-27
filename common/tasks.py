@@ -163,3 +163,43 @@ def reconcile_counters():
     )
     logger.info(summary)
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Moderation escalation
+# ---------------------------------------------------------------------------
+
+@shared_task
+def escalate_manual_review():
+    """Surface moderation items stuck in manual review for over 24 hours.
+
+    This doesn't change any data — it only logs a warning so your monitoring
+    pipeline (Datadog, Sentry, CloudWatch, etc.) can fire alerts.  If you
+    need auto-escalation (e.g. Slack webhook / PagerDuty), extend this task.
+    """
+    from datetime import timedelta
+    from django.utils import timezone
+    from community.models import Post, Comment
+
+    cutoff = timezone.now() - timedelta(hours=24)
+
+    stuck_posts = Post.objects.filter(
+        requires_manual_review=True,
+        moderated_at__lte=cutoff,
+    ).count()
+
+    stuck_comments = Comment.objects.filter(
+        requires_manual_review=True,
+        moderated_at__lte=cutoff,
+    ).count()
+
+    if stuck_posts or stuck_comments:
+        logger.warning(
+            "moderation.escalation: %d posts and %d comments have been "
+            "pending manual review for >24 h — investigate moderation outage.",
+            stuck_posts,
+            stuck_comments,
+        )
+
+    return f"escalation_check: {stuck_posts} posts, {stuck_comments} comments"
+

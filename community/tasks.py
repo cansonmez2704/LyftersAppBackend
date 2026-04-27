@@ -20,6 +20,39 @@ logger = logging.getLogger(__name__)
 PURGE_AFTER_DAYS = 30
 
 
+# ---------------------------------------------------------------------------
+# Debounce helper
+# ---------------------------------------------------------------------------
+
+def dispatch_moderation(content_type_id: int, object_id: int) -> None:
+    """Schedule ``moderate_content`` with a 3-second countdown + debounce.
+
+    When a user edits a post title ten times in a row, this fires only one
+    effective moderation API call — not ten.  Each dispatch stamps a
+    monotonic ``dispatch_ts`` into the cache.  The task compares its own
+    timestamp against the latest one; if a newer dispatch superseded it,
+    the task exits early.
+
+    **Must be called inside** ``transaction.on_commit()`` — this function
+    does NOT wrap itself in one.
+    """
+    import time
+
+    ts = time.time()
+    try:
+        from django.core.cache import cache
+        cache.set(f"mod_dispatch:{content_type_id}:{object_id}", str(ts), timeout=60)
+    except Exception:
+        ts = None  # Cache down — fall through without debounce.
+
+    kwargs = {"dispatch_ts": ts} if ts is not None else {}
+    moderate_content.apply_async(
+        args=[content_type_id, object_id],
+        kwargs=kwargs,
+        countdown=3,
+    )
+
+
 # OpenAI SDK exception classes are loaded lazily in the task body so that
 # importing tasks.py does not require the openai package at module-import
 # time (e.g. during makemigrations or when running unrelated tests).
@@ -83,7 +116,7 @@ def process_post_media(self, post_media_id):
     retry_jitter=True,
     max_retries=3,
 )
-def moderate_content(self, content_type_id: int, object_id: int):
+def moderate_content(self, content_type_id: int, object_id: int, dispatch_ts=None):
     """Screen a Moderatable instance against the OpenAI Moderation API.
 
     Outcomes:
@@ -95,6 +128,19 @@ def moderate_content(self, content_type_id: int, object_id: int):
         but requires_manual_review=True so an admin sees it. Set
         ``MODERATION_FAIL_OPEN=False`` to fail-closed instead.
     """
+    # --- Debounce: skip if a newer dispatch has superseded this one -------
+    if dispatch_ts is not None:
+        try:
+            from django.core.cache import cache
+            latest = cache.get(f"mod_dispatch:{content_type_id}:{object_id}")
+            if latest and float(latest) > dispatch_ts:
+                logger.info(
+                    "moderate_content: debounced %s#%s (superseded by newer edit)",
+                    content_type_id, object_id,
+                )
+                return "debounced"
+        except Exception:
+            pass  # Cache unavailable — run moderation anyway.
     from common.moderation import ModerationDecision, ModerationResult, ModerationStatus
     from common import openai_client
 
