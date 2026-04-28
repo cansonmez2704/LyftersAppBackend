@@ -1,4 +1,7 @@
+from django.contrib.auth import get_user_model
 from django.urls import path
+from rest_framework import status
+from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 from rest_framework.throttling import ScopedRateThrottle
 from .views import (
@@ -15,6 +18,17 @@ from .views import (
 class ThrottledTokenRefreshView(TokenRefreshView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'strict_auth'
+
+    def post(self, request, *args, **kwargs):
+        User = get_user_model()
+        try:
+            return super().post(request, *args, **kwargs)
+        except User.DoesNotExist:
+            # Stale refresh (e.g. DB reset) — simplejwt can raise looking up outstanding token user.
+            return Response(
+                {"detail": "Token is invalid or user no longer exists."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
 
 
 class ThrottledTokenVerifyView(TokenVerifyView):

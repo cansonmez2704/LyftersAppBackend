@@ -324,6 +324,11 @@ GROQ_MODERATION_MODEL = os.getenv("GROQ_MODERATION_MODEL", "llama-3.1-8b-instant
 # requirements ever demand it.
 MODERATION_FAIL_OPEN = os.getenv("MODERATION_FAIL_OPEN", "True") == "True"
 
+# --- YouTube Data API v3 ---------------------------------------------------
+# Used by the `backfill_video_urls` management command to populate
+# Exercise.video_url with embeddable tutorial videos.
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+
 
 from celery.schedules import crontab
 

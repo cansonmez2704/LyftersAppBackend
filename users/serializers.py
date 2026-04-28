@@ -154,7 +154,10 @@ class MiniUserProfileSerializer(serializers.ModelSerializer):
         fields = ("user", "avatar", "bio", "is_public", "followers_count", "following_count")
 
 class OwnProfileSerializer(serializers.ModelSerializer):
-    user = UserSerializer()
+    # Read-only nested user — PATCH targets UserProfile fields only (username
+    # changes use a dedicated flow). Writable nested serializers are not supported
+    # by ModelSerializer.update() unless we supply a custom update().
+    user = UserSerializer(read_only=True)
     posts = serializers.SerializerMethodField()
     workouts = serializers.SerializerMethodField()
     follow = serializers.SerializerMethodField()
