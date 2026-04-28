@@ -84,7 +84,7 @@ SOCIALACCOUNT_PROVIDERS = {
         'AUTH_PARAMS': {
             'access_type': 'online',
         },
-        'OAUTH_PKCE_ENABLED': True,
+        'OAUTH_PKCE_ENABLED': False,
         # Google always returns verified emails, so we can trust them for
         # account linking below.
         'EMAIL_AUTHENTICATION': True,
@@ -313,12 +313,12 @@ CELERY_TASK_ROUTES = {
 }
 
 
-# --- OpenAI Moderation -----------------------------------------------------
+# --- Groq Moderation (Llama Guard) -----------------------------------------
 # Key only ever read server-side; never expose to clients or log it.
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODERATION_MODEL = os.getenv("OPENAI_MODERATION_MODEL", "omni-moderation-latest")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODERATION_MODEL = os.getenv("GROQ_MODERATION_MODEL", "llama-3.1-8b-instant")
 
-# Fail-open: after Celery exhausts retries (OpenAI down for an extended
+# Fail-open: after Celery exhausts retries (Groq down for an extended
 # window) we still publish the post and queue it for human review rather
 # than freezing user content. Flip to False to fail-closed if compliance
 # requirements ever demand it.
@@ -423,5 +423,6 @@ else:
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:5173",
+        "http://localhost:5174",
     ]
     CORS_ALLOW_CREDENTIALS = True

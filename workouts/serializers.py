@@ -55,7 +55,7 @@ class WorkoutListSerializer(serializers.ModelSerializer):
         model = Workout
         fields = (
             "id", "uuid", "owner", "name", "description", "cover_image",
-            "visibility", "estimated_duration_min", "is_template",
+            "visibility", "estimated_duration_min",
             "created_at", "updated_at",
         )
 
@@ -66,7 +66,7 @@ class WorkoutSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Workout
-        fields = ("id","uuid","owner","name","description","cover_image","workout_exercises","visibility","estimated_duration_min","is_template","created_at","updated_at")
+        fields = ("id","uuid","owner","name","description","cover_image","workout_exercises","visibility","estimated_duration_min","created_at","updated_at")
 
     
 
@@ -75,7 +75,7 @@ class WorkoutWriteSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Workout
-        fields = ("id", "name", "description", "cover_image", "workout_exercises", "visibility", "estimated_duration_min", "is_template")
+        fields = ("id", "name", "description", "cover_image", "workout_exercises", "visibility", "estimated_duration_min")
     
     def create(self, validated_data):
         with transaction.atomic():
@@ -126,42 +126,44 @@ class WorkoutWriteSerializer(serializers.ModelSerializer):
         """
         Reconciles incoming nested data with existing database records.
         """
-        # 1. Map existing exercises by ID for O(1) lookup
         existing_exercises = {we.id: we for we in workout.workout_exercises.all()}
         incoming_exercises_ids = [item['id'] for item in exercises_data if 'id' in item]
 
-        # 2. BULK DELETE: Find all IDs that are missing from the incoming payload
         ids_to_delete = [
             ex_id for ex_id in existing_exercises.keys()
             if ex_id not in incoming_exercises_ids
         ]
-        
+
         if ids_to_delete:
-            # FIXED: One single SQL query to delete all orphaned exercises
             WorkoutExercise.objects.filter(id__in=ids_to_delete).delete()
-            
-            # Clean up our dictionary in memory so we don't try to update deleted records below
             for ex_id in ids_to_delete:
                 existing_exercises.pop(ex_id)
 
-        # 3. UPDATE & CREATE
+        # Shift existing orders to high temp values to avoid unique constraint
+        # violations when reordering (unique on workout_id + order).
+        offset = 10000
+        for we in existing_exercises.values():
+            we.order = we.order + offset
+        WorkoutExercise.objects.bulk_update(existing_exercises.values(), ["order"])
+
+        sets_by_we = {}
+
         for item in exercises_data:
             exercise_id = item.get('id')
             sets_data = item.pop('sets', [])
 
             if exercise_id and exercise_id in existing_exercises:
-                # UPDATE Exercise
                 we_instance = existing_exercises[exercise_id]
                 for attr, value in item.items():
                     setattr(we_instance, attr, value)
                 we_instance.save()
             else:
-                # CREATE Exercise
                 we_instance = WorkoutExercise.objects.create(workout=workout, **item)
 
-            # 4. SYNC SETS (Nuke-and-pave within the exercise for simplicity/performance)
+            sets_by_we[we_instance.id] = (we_instance, sets_data)
+
+        for we_instance, sets_data in sets_by_we.values():
             we_instance.sets.all().delete()
-            
             if sets_data:
                 WorkoutSet.objects.bulk_create([
                     WorkoutSet(workout_exercise=we_instance, **s) for s in sets_data

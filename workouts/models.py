@@ -1,7 +1,7 @@
 
 import uuid as uuid_lib
 from django.conf import settings
-from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.indexes import GinIndex, OpClass
 from django.contrib.postgres.search import SearchVector, SearchVectorField
 from django.contrib.postgres.fields import ArrayField
 from django.db import models, transaction
@@ -98,6 +98,10 @@ class Exercise(models.Model):
         indexes = [
             models.Index(fields=["exercise_type", "movement_type"]),
             GinIndex(fields=["search_vector"], name="exercise_search_gin"),
+            GinIndex(
+                OpClass(models.F("name"), name="gin_trgm_ops"),
+                name="exercise_name_trgm",
+            ),
         ]
     def __str__(self) -> str:
         return f"{self.name} ({self.get_exercise_type_display()})"
@@ -150,6 +154,10 @@ class Workout(models.Model):
             models.Index(fields=["owner", "visibility"]),
             models.Index(fields=["owner", "-created_at"]),
             GinIndex(fields=["search_vector"], name="workout_search_gin"),
+            GinIndex(
+                OpClass(models.F("name"), name="gin_trgm_ops"),
+                name="workout_name_trgm",
+            ),
         ]
     def __str__(self) -> str:
         return f"{self.name} (by {self.owner})"

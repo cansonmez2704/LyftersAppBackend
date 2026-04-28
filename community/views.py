@@ -281,32 +281,53 @@ class CommentViewSet(ModelViewSet):
             uuid=self.kwargs["post_uuid"],
         )
         self.check_object_permissions(self.request, post)
-        comment = serializer.save(author=self.request.user, post=post)
+
+        # Sync moderation already ran in serializer.validate(). If it
+        # cleared the comment, save as PUBLISHED so the 201 response
+        # echoes the final state. If sync was unavailable, save as
+        # PENDING and let the async Celery path re-screen.
+        extra = {"author": self.request.user, "post": post}
+        sync_ok = getattr(serializer, "_sync_moderation_passed", None)
+        if sync_ok:
+            from django.utils import timezone
+            extra["moderation_status"] = ModerationStatus.PUBLISHED
+            extra["moderated_at"] = timezone.now()
+
+        comment = serializer.save(**extra)
         Post.objects.filter(pk=post.pk).update(comments_count=F("comments_count") + 1)
 
-        from .tasks import dispatch_moderation
-        comment_ct_id = ContentType.objects.get_for_model(Comment).id
-        transaction.on_commit(
-            lambda cid=comment.pk: dispatch_moderation(comment_ct_id, cid)
-        )
+        if not sync_ok:
+            from .tasks import dispatch_moderation
+            comment_ct_id = ContentType.objects.get_for_model(Comment).id
+            transaction.on_commit(
+                lambda cid=comment.pk: dispatch_moderation(comment_ct_id, cid)
+            )
 
     def perform_update(self, serializer):
-        """Re-moderate when the comment body changes.
+        """Re-screen on body edits.
 
-        Same pattern as PostWriteSerializer.update: reset to PENDING so the
-        visibility filter hides it from non-authors until the Celery task
-        re-screens the new text.
+        Sync moderation already ran in validate(). If it passed, mark
+        PUBLISHED. If sync was unavailable, fall back to PENDING + async.
+        Body unchanged = nothing to do.
         """
         old_body = serializer.instance.body
         comment = serializer.save()
 
-        if comment.body != old_body:
-            from common.moderation import ModerationStatus
+        if comment.body == old_body:
+            return
+
+        sync_ok = getattr(serializer, "_sync_moderation_passed", None)
+        from django.utils import timezone
+        if sync_ok:
+            Comment.objects.filter(pk=comment.pk).update(
+                moderation_status=ModerationStatus.PUBLISHED,
+                moderated_at=timezone.now(),
+            )
+        else:
             Comment.objects.filter(pk=comment.pk).update(
                 moderation_status=ModerationStatus.PENDING,
                 moderated_at=None,
             )
-
             from .tasks import dispatch_moderation
             comment_ct_id = ContentType.objects.get_for_model(Comment).id
             transaction.on_commit(

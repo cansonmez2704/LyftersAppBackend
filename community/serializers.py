@@ -1,11 +1,56 @@
+import logging
+
 from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
 from users.serializers import MiniUserProfileSerializer
 from .models import Post, PostMedia, PostReaction, Comment, CommentReaction, POST_DESCRIPTION_MAX_LENGTH
 from common.moderation import ModerationStatus
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.urls import reverse
+
+logger = logging.getLogger(__name__)
+
+
+def _moderate_or_raise(text: str, *, kind: str):
+    """Synchronously screen ``text`` against Groq before persisting.
+
+    Returns:
+      * ``True``  — content passed the check (sync path completed cleanly).
+        Caller should publish immediately and skip the async dispatch.
+      * ``False`` — Groq was unreachable. Caller should fall back to the
+        async Celery path so a third-party outage doesn't block users.
+
+    Raises:
+      ``ValidationError`` — content was flagged. Surface a 400 with a
+      human-readable policy message; do NOT save.
+    """
+    text = (text or "").strip()
+    if not text:
+        return True
+
+    from common import groq_client
+
+    try:
+        response = groq_client.moderate_text(text)
+    except Exception as exc:
+        logger.warning(
+            "Sync moderation unavailable for %s; deferring to async backup: %r",
+            kind, exc,
+        )
+        return False
+
+    if not response.flagged:
+        return True
+
+    hits = sorted(name for name, hit in response.categories.items() if hit)
+    raise serializers.ValidationError({
+        "detail": (
+            f"This {kind} cannot be posted because it appears to violate our "
+            "community guidelines and respect policy. Please revise your "
+            "content and try again."
+        ),
+        "categories": hits,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +178,16 @@ class CommentSerializer(serializers.ModelSerializer):
             )
 
         data['depth'] = instance.depth
+
+        # Sync moderation: only re-screen if the body actually changed (PATCH
+        # with no body edit must not burn an API call). New comments always
+        # have self.instance == None -> always screened.
+        new_body = data.get("body", "")
+        if self.instance is None or self.instance.body != new_body:
+            self._sync_moderation_passed = _moderate_or_raise(new_body, kind="comment")
+        else:
+            self._sync_moderation_passed = None
+
         return data
 
 
@@ -216,9 +271,42 @@ class PostWriteSerializer(serializers.ModelSerializer):
         model = Post
         fields = ("title", "description", "cover_image", "post_type", "visibility", "linked_workout", "media")
 
+    def validate(self, data):
+        # Mirror Post.get_moderation_text() so the sync path screens the same
+        # string the async fallback would have screened.
+        new_title = data.get("title", "") if "title" in data else (
+            self.instance.title if self.instance else ""
+        )
+        new_description = data.get("description", "") if "description" in data else (
+            self.instance.description if self.instance else ""
+        )
+        text_changed = self.instance is None or (
+            (self.instance.title or "") != (new_title or "")
+            or (self.instance.description or "") != (new_description or "")
+        )
+
+        if text_changed:
+            text = "\n".join(filter(None, [new_title, new_description]))
+            self._sync_moderation_passed = _moderate_or_raise(text, kind="post")
+        else:
+            self._sync_moderation_passed = None
+
+        return data
+
     def create(self, validated_data):
         with transaction.atomic():
             media_data = validated_data.pop("media", [])
+
+            # If sync moderation already cleared the text, persist as
+            # PUBLISHED so it's visible immediately and skip the async
+            # dispatch. Only fall back to async (= save PENDING + queue
+            # task) when sync moderation was unavailable.
+            sync_ok = getattr(self, "_sync_moderation_passed", None)
+            if sync_ok:
+                from django.utils import timezone
+                validated_data["moderation_status"] = ModerationStatus.PUBLISHED
+                validated_data["moderated_at"] = timezone.now()
+
             post = Post.objects.create(**validated_data)
 
             # PostMediaWriteSerializer.validate already ran clean() on each
@@ -235,12 +323,12 @@ class PostWriteSerializer(serializers.ModelSerializer):
                         lambda mid=media.pk: process_post_media.delay(mid)
                     )
 
-            # Dispatch moderation only on_commit so the task never sees
-            # an uncommitted Post (race on read replicas / pgbouncer).
-            post_ct_id = ContentType.objects.get_for_model(Post).id
-            transaction.on_commit(
-                lambda pid=post.pk: dispatch_moderation(post_ct_id, pid)
-            )
+            if not sync_ok:
+                # Sync moderation didn't run (Groq down) — defer to async.
+                post_ct_id = ContentType.objects.get_for_model(Post).id
+                transaction.on_commit(
+                    lambda pid=post.pk: dispatch_moderation(post_ct_id, pid)
+                )
 
             return post
 
@@ -251,13 +339,17 @@ class PostWriteSerializer(serializers.ModelSerializer):
             for attr, value in validated_data.items():
                 setattr(instance, attr, value)
 
-            # If user-supplied text was edited, re-moderate. Reset to
-            # PENDING and let the queryset filter hide it from non-authors
-            # until the task runs — same UX as initial post.
+            sync_ok = getattr(self, "_sync_moderation_passed", None)
             if text_changed:
-                from common.moderation import ModerationStatus
-                instance.moderation_status = ModerationStatus.PENDING
-                instance.moderated_at = None
+                from django.utils import timezone
+                if sync_ok:
+                    instance.moderation_status = ModerationStatus.PUBLISHED
+                    instance.moderated_at = timezone.now()
+                else:
+                    # Groq unavailable: fall back to the async path. Hide
+                    # from non-authors until the Celery task re-screens.
+                    instance.moderation_status = ModerationStatus.PENDING
+                    instance.moderated_at = None
 
             instance.save()
 
@@ -274,7 +366,7 @@ class PostWriteSerializer(serializers.ModelSerializer):
                             lambda mid=media.pk: process_post_media.delay(mid)
                         )
 
-            if text_changed:
+            if text_changed and not sync_ok:
                 from .tasks import dispatch_moderation
                 from django.contrib.contenttypes.models import ContentType
                 post_ct_id = ContentType.objects.get_for_model(Post).id

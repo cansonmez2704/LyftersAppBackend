@@ -23,7 +23,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from common.moderation import ModerationDecision, ModerationResult, ModerationStatus
-from common.openai_client import ModerationResponse
+from common.groq_client import ModerationResponse
 from community.models import Comment, Post
 from community.tasks import moderate_content, dispatch_moderation
 from users.models import UserProfile
@@ -67,7 +67,7 @@ class ModerationTaskTest(TestCase):
         self.ct_id = ContentType.objects.get_for_model(Post).id
 
     # ---------------------------------------------------------------- allow
-    @patch("common.openai_client.moderate_text")
+    @patch("common.groq_client.moderate_text")
     def test_allowed_content_published(self, mock_mod):
         mock_mod.return_value = _make_moderation_response(flagged=False)
 
@@ -86,7 +86,7 @@ class ModerationTaskTest(TestCase):
         )
 
     # ---------------------------------------------------------------- block
-    @patch("common.openai_client.moderate_text")
+    @patch("common.groq_client.moderate_text")
     def test_flagged_content_rejected(self, mock_mod):
         mock_mod.return_value = _make_moderation_response(
             flagged=True,
@@ -106,7 +106,7 @@ class ModerationTaskTest(TestCase):
         self.assertIn("hate", audit.category_scores)
 
     # --------------------------------------------------------- empty text
-    @patch("common.openai_client.moderate_text")
+    @patch("common.groq_client.moderate_text")
     def test_empty_text_auto_allows(self, mock_mod):
         self.post.title = ""
         self.post.description = ""
@@ -126,7 +126,7 @@ class ModerationTaskTest(TestCase):
         self.assertEqual(result, "target_missing")
 
     # ------------------------------------------------- retry exhaustion: fail-open
-    @patch("common.openai_client.moderate_text")
+    @patch("common.groq_client.moderate_text")
     @override_settings(MODERATION_FAIL_OPEN=True)
     def test_fail_open_publishes_with_manual_review(self, mock_mod):
         mock_mod.side_effect = TimeoutError("API down")
@@ -151,7 +151,7 @@ class ModerationTaskTest(TestCase):
         )
 
     # ------------------------------------------------- retry exhaustion: fail-closed
-    @patch("common.openai_client.moderate_text")
+    @patch("common.groq_client.moderate_text")
     @override_settings(MODERATION_FAIL_OPEN=False)
     def test_fail_closed_sets_error_status(self, mock_mod):
         mock_mod.side_effect = TimeoutError("API down")
@@ -168,7 +168,7 @@ class ModerationTaskTest(TestCase):
         self.assertFalse(self.post.requires_manual_review)
 
     # ------------------------------------------------------- debounce
-    @patch("common.openai_client.moderate_text")
+    @patch("common.groq_client.moderate_text")
     def test_debounced_task_skips_when_superseded(self, mock_mod):
         """When a newer dispatch_ts exists in cache, older tasks skip."""
         from django.core.cache import cache
@@ -184,7 +184,7 @@ class ModerationTaskTest(TestCase):
         self.assertEqual(result, "debounced")
         mock_mod.assert_not_called()
 
-    @patch("common.openai_client.moderate_text")
+    @patch("common.groq_client.moderate_text")
     def test_task_runs_normally_without_dispatch_ts(self, mock_mod):
         """Backward compat: tasks dispatched without dispatch_ts run normally."""
         mock_mod.return_value = _make_moderation_response(flagged=False)
@@ -195,7 +195,7 @@ class ModerationTaskTest(TestCase):
         mock_mod.assert_called_once()
 
     # --------------------------------------------------- comment moderation
-    @patch("common.openai_client.moderate_text")
+    @patch("common.groq_client.moderate_text")
     def test_comment_moderation_allowed(self, mock_mod):
         mock_mod.return_value = _make_moderation_response(flagged=False)
         comment = Comment.objects.create(
@@ -209,7 +209,7 @@ class ModerationTaskTest(TestCase):
         self.assertEqual(result, ModerationDecision.ALLOW)
         self.assertEqual(comment.moderation_status, ModerationStatus.PUBLISHED)
 
-    @patch("common.openai_client.moderate_text")
+    @patch("common.groq_client.moderate_text")
     def test_comment_moderation_rejected(self, mock_mod):
         mock_mod.return_value = _make_moderation_response(flagged=True)
         comment = Comment.objects.create(

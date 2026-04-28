@@ -49,7 +49,7 @@ class ExerciseSearchResultSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Exercise
-        fields = ("id", "name", "exercise_type", "movement_type", "muscles", "rank")
+        fields = ("id", "uuid", "name", "exercise_type", "movement_type", "muscles", "rank")
 
 
 class WorkoutSearchResultSerializer(serializers.ModelSerializer):
@@ -58,7 +58,7 @@ class WorkoutSearchResultSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Workout
-        fields = ("id", "name", "description", "owner", "rank")
+        fields = ("id", "uuid", "name", "description", "owner", "rank")
 
 
 
