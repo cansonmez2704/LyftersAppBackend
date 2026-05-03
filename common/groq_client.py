@@ -92,12 +92,16 @@ def _get_client():
 
 
 def moderate_text(text: str) -> ModerationResponse:
-    """Classify ``text`` via Groq.
+    """Classify ``text`` via the configured provider (Groq by default).
 
     Re-raises the SDK's exceptions; the Celery task catches them to drive
     its retry/fail-open logic. Network/timeout errors must NOT be silently
     converted to "allowed" here — that decision belongs in the caller.
     """
+    if getattr(settings, "MODERATION_PROVIDER", "groq") == "openai":
+        from common import openai_moderation
+        return openai_moderation.moderate_text(text)
+
     client = _get_client()
     response = client.chat.completions.create(
         model=settings.GROQ_MODERATION_MODEL,
@@ -108,6 +112,7 @@ def moderate_text(text: str) -> ModerationResponse:
         temperature=0.0,
         max_tokens=256,
         response_format={"type": "json_object"},
+        timeout=settings.GROQ_MODERATION_TIMEOUT,
     )
 
     raw_output = response.choices[0].message.content or "{}"

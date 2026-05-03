@@ -150,6 +150,19 @@ REST_FRAMEWORK = {
     }
 }
 
+# LOAD_TEST_MODE: when set, multiplies throttle ceilings ~100x so load tests
+# measure infrastructure capacity instead of throttle behavior. Never enable
+# in production.
+if os.getenv("LOAD_TEST_MODE") == "1":
+    REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] = {
+        'anon': '10000/hour',
+        'user': '100000/hour',
+        'reaction_spam': '2000/min',
+        'search': '3000/min',
+        'strict_auth': '500/min',
+        'social_write': '6000/min',
+    }
+
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
@@ -194,7 +207,7 @@ USE_PGBOUNCER = os.getenv("USE_PGBOUNCER", "False") == "True"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "gym_hub",
+        "NAME": os.getenv("DJANGO_DB_NAME", "gym_hub"),
         "USER": "postgres",
         "PASSWORD": os.getenv("DB_PASSWORD"),
         "HOST": "localhost",
@@ -318,11 +331,33 @@ CELERY_TASK_ROUTES = {
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODERATION_MODEL = os.getenv("GROQ_MODERATION_MODEL", "llama-3.1-8b-instant")
 
+# Hard ceiling on the sync moderation path. Without a timeout, a slow Groq
+# response holds a gunicorn worker + DB connection until the SDK's default
+# (~60s), which can drain the worker pool during a Groq incident. The fail-
+# open branch in `_moderate_or_raise` catches the timeout and defers to the
+# async Celery path, so a tight timeout here costs at most one extra task
+# enqueue per affected request.
+GROQ_MODERATION_TIMEOUT = float(os.getenv("GROQ_MODERATION_TIMEOUT", "5.0"))
+
 # Fail-open: after Celery exhausts retries (Groq down for an extended
 # window) we still publish the post and queue it for human review rather
 # than freezing user content. Flip to False to fail-closed if compliance
 # requirements ever demand it.
 MODERATION_FAIL_OPEN = os.getenv("MODERATION_FAIL_OPEN", "True") == "True"
+
+# When True (default), POST /posts and /comments call the moderation provider
+# inline before responding — instant feedback, but a slow/rate-limited provider
+# stalls request workers and can cascade into 500s on unrelated endpoints.
+# When False, all moderation runs in the existing celery task; posts appear as
+# PENDING for a few seconds then flip to PUBLISHED. Recommended for production.
+MODERATION_SYNC_ENABLED = os.getenv("MODERATION_SYNC_ENABLED", "True") == "True"
+
+# "groq" (default) or "openai". When "openai", set OPENAI_API_KEY too.
+# OpenAI's moderation endpoint is free and has higher rate limits than Groq's
+# free tier, with comparable multilingual quality. The provider modules expose
+# the same moderate_text() interface so callers don't change.
+MODERATION_PROVIDER = os.getenv("MODERATION_PROVIDER", "groq").lower()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # --- YouTube Data API v3 ---------------------------------------------------
 # Used by the `backfill_video_urls` management command to populate

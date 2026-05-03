@@ -17,8 +17,9 @@ def _moderate_or_raise(text: str, *, kind: str):
     Returns:
       * ``True``  — content passed the check (sync path completed cleanly).
         Caller should publish immediately and skip the async dispatch.
-      * ``False`` — Groq was unreachable. Caller should fall back to the
-        async Celery path so a third-party outage doesn't block users.
+      * ``False`` — sync mode disabled, or Groq was unreachable. Caller
+        should fall back to the async Celery path so a third-party outage
+        doesn't block users.
 
     Raises:
       ``ValidationError`` — content was flagged. Surface a 400 with a
@@ -27,6 +28,13 @@ def _moderate_or_raise(text: str, *, kind: str):
     text = (text or "").strip()
     if not text:
         return True
+
+    # Async-only mode: skip the sync API call entirely. The caller already
+    # has a "if not sync_ok: dispatch_moderation" branch wired up, so the
+    # post/comment will be saved as PENDING and screened by the celery task.
+    from django.conf import settings as dj_settings
+    if not getattr(dj_settings, "MODERATION_SYNC_ENABLED", True):
+        return False
 
     from common import groq_client
 
