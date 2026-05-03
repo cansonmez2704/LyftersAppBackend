@@ -141,6 +141,12 @@ class Workout(models.Model):
         blank=True,
         help_text="Estimated duration in minutes.",
     )
+
+    spotify_playlist_url = models.URLField(
+        blank=True,
+        default="",
+        help_text="Optional Spotify playlist link for this workout.",
+    )
     
     uuid = models.UUIDField(default=uuid_lib.uuid4, editable=False, unique=True, db_index=True)
     search_vector = SearchVectorField(null=True)

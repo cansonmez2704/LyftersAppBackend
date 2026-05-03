@@ -339,13 +339,18 @@ class CommentViewSet(ModelViewSet):
         # comments_count decrement never runs twice for the same comment.
         # Children keep their parent link + depth; the UI greys out the
         # deleted node via `is_deleted`, preserving the reply tree structure.
-        updated = Comment.objects.filter(pk=instance.pk, is_deleted=False).update(is_deleted=True)
-        if not updated:
-            return
+        # The wrapping atomic() ensures the soft-delete and counter update
+        # commit together — without it, a connection drop between the two
+        # statements would leave Post.comments_count stale until the 6h
+        # reconciliation job runs.
+        with transaction.atomic():
+            updated = Comment.objects.filter(pk=instance.pk, is_deleted=False).update(is_deleted=True)
+            if not updated:
+                return
 
-        Post.objects.filter(pk=instance.post_id).update(
-            comments_count=Greatest(F("comments_count") - 1, Value(0))
-        )
+            Post.objects.filter(pk=instance.post_id).update(
+                comments_count=Greatest(F("comments_count") - 1, Value(0))
+            )
 
     @action(detail=True, methods=["POST"], url_path="react", throttle_classes=[ReactionSpamThrottle])
     def react_to_comments(self, request, comment_uuid=None):

@@ -55,7 +55,7 @@ class WorkoutListSerializer(serializers.ModelSerializer):
         model = Workout
         fields = (
             "id", "uuid", "owner", "name", "description", "cover_image",
-            "visibility", "estimated_duration_min",
+            "visibility", "estimated_duration_min", "spotify_playlist_url",
             "created_at", "updated_at",
         )
 
@@ -66,7 +66,7 @@ class WorkoutSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Workout
-        fields = ("id","uuid","owner","name","description","cover_image","workout_exercises","visibility","estimated_duration_min","created_at","updated_at")
+        fields = ("id","uuid","owner","name","description","cover_image","workout_exercises","visibility","estimated_duration_min","spotify_playlist_url","created_at","updated_at")
 
     
 
@@ -75,7 +75,7 @@ class WorkoutWriteSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Workout
-        fields = ("id", "name", "description", "cover_image", "workout_exercises", "visibility", "estimated_duration_min")
+        fields = ("id", "name", "description", "cover_image", "workout_exercises", "visibility", "estimated_duration_min", "spotify_playlist_url")
     
     def create(self, validated_data):
         with transaction.atomic():

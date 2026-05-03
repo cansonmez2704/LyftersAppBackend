@@ -14,8 +14,15 @@ from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.http import Http404
 from rest_framework import status
 from rest_framework.exceptions import APIException
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
+
+try:
+    # Raised by django-allauth / dj-rest-auth social login flows.
+    from allauth.socialaccount.providers.oauth2.client import OAuth2Error
+except Exception:  # pragma: no cover
+    OAuth2Error = None
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +55,10 @@ def custom_exception_handler(exc, context):
     elif isinstance(exc, DjangoPermissionDenied):
         exc = APIException(detail="Permission denied.")
         exc.status_code = status.HTTP_403_FORBIDDEN
+    elif OAuth2Error is not None and isinstance(exc, OAuth2Error):
+        # Common case: Google returns an invalid/expired token.
+        # Surface it as a 400 so clients can retry login.
+        exc = ValidationError({"detail": "Google authentication failed. Please try again."})
 
     response = drf_exception_handler(exc, context)
 

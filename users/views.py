@@ -249,8 +249,28 @@ class AcceptFollowView(APIView):
             # Use the DRY locking utility we created to prevent deadlocks
             locked_profiles = lock_profiles_for_update(target_profile_pk, follower_profile_pk, UserProfile)
 
-            follow_request.status = UserFollower.FollowStatus.ACCEPTED
-            follow_request.save(update_fields=["status"])
+            # Re-fetch the follow request under a row lock so a concurrent
+            # cancel (toggle_follow's unfollow branch) can't delete it after
+            # we read it. Without this, the status UPDATE silently affects
+            # zero rows while the counter increments still fire — producing
+            # phantom followers until reconcile_counters runs.
+            locked_request = (
+                UserFollower.objects
+                .select_for_update()
+                .filter(
+                    pk=follow_request.pk,
+                    status=UserFollower.FollowStatus.PENDING,
+                )
+                .first()
+            )
+            if locked_request is None:
+                return Response(
+                    {"status": "Follow request no longer pending"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            locked_request.status = UserFollower.FollowStatus.ACCEPTED
+            locked_request.save(update_fields=["status"])
 
             UserProfile.objects.filter(pk=target_profile_pk).update(
                 followers_count=F("followers_count") + 1,
