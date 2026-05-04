@@ -50,8 +50,12 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
+# --- Claude Code (local-only; skills + settings stay per-clone) ---
+.claude/
+
 # --- Load test artifacts (source kept, generated output ignored) ---
 loadtest/logs/
 loadtest/fixtures.json
 loadtest/report_*.html
 loadtest/report_*.csv
+loadtest/pgbouncer/userlist.txt

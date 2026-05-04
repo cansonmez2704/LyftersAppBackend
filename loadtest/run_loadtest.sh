@@ -11,6 +11,10 @@
 #   GUNICORN_WORKER_CLASS=gevent ./loadtest/run_loadtest.sh                           # async (IO-bound) workers
 #   GUNICORN_WORKER_CLASS=gevent GUNICORN_WORKER_CONNECTIONS=2000 ./loadtest/run_loadtest.sh
 #
+# Front Postgres with pgbouncer (transaction pooling) to clear the
+# max_connections=100 ceiling at 500u:
+#   USE_PGBOUNCER=True GUNICORN_WORKER_CLASS=gevent ./loadtest/run_loadtest.sh
+#
 # Compare runs by saving Locust's "Download Data > Report" between configs.
 #
 # Then in a second terminal:
@@ -34,12 +38,27 @@ WORKER_CLASS="${GUNICORN_WORKER_CLASS:-sync}"          # sync | gevent
 WORKER_CONNECTIONS="${GUNICORN_WORKER_CONNECTIONS:-1000}"  # gevent only — concurrent greenlets per worker
 PORT="${PORT:-8000}"
 PG_USER="${PG_USER:-postgres}"
+USE_PGBOUNCER="${USE_PGBOUNCER:-False}"
 
 # gevent monkey-patches the stdlib at import; gunicorn handles the patching when
 # you select the worker class, but the worker process still needs the package available.
 if [[ "$WORKER_CLASS" == "gevent" ]]; then
     if ! python -c "import gevent" 2>/dev/null; then
         echo "ERROR: --worker-class gevent requested but gevent isn't installed in venv." >&2
+        exit 1
+    fi
+fi
+
+if [[ "$USE_PGBOUNCER" == "True" ]]; then
+    if ! command -v pgbouncer >/dev/null 2>&1; then
+        echo "ERROR: USE_PGBOUNCER=True but pgbouncer is not on PATH. Install it first: brew install pgbouncer" >&2
+        exit 1
+    fi
+    if lsof -ti:6432 >/dev/null 2>&1; then
+        echo "ERROR: Port 6432 already in use by:" >&2
+        lsof -i:6432 >&2
+        echo "" >&2
+        echo "Kill it first:  lsof -ti:6432 | xargs kill -9" >&2
         exit 1
     fi
 fi
@@ -112,6 +131,39 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+if [[ "$USE_PGBOUNCER" == "True" ]]; then
+    echo "Generating loadtest/pgbouncer/userlist.txt from .env..."
+    python - >loadtest/pgbouncer/userlist.txt <<'PY'
+import os, hashlib
+from dotenv import load_dotenv
+load_dotenv(".env")
+pwd = os.environ["DB_PASSWORD"]
+user = "postgres"
+print(f'"{user}" "md5{hashlib.md5((pwd + user).encode()).hexdigest()}"')
+PY
+    chmod 600 loadtest/pgbouncer/userlist.txt
+
+    echo "Starting pgbouncer on :6432 (logs: loadtest/logs/pgbouncer.log)..."
+    pgbouncer loadtest/pgbouncer/pgbouncer.ini &
+    PIDS+=($!)
+
+    for _ in {1..20}; do
+        if pg_isready -h 127.0.0.1 -p 6432 -q 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    if ! pg_isready -h 127.0.0.1 -p 6432 -q 2>/dev/null; then
+        echo "ERROR: pgbouncer failed to come up on :6432. See loadtest/logs/pgbouncer.log" >&2
+        exit 1
+    fi
+
+    # App processes (gunicorn, celery) talk to pgbouncer; migrations + seed already
+    # ran direct to :5432 above, which is what we want — admin work goes direct.
+    export DB_PORT=6432
+    export USE_PGBOUNCER=True
+fi
+
 echo "Starting celery worker (logs: loadtest/logs/celery.log)..."
 celery -A core worker -l warning -Q default,media,maintenance,moderation --concurrency=2 \
     >loadtest/logs/celery.log 2>&1 &
@@ -147,7 +199,7 @@ cat <<EOF
 
 ===================================================================
 Server is up.
-  DB:       $DJANGO_DB_NAME
+  DB:       $DJANGO_DB_NAME$([ "$USE_PGBOUNCER" = "True" ] && echo " via pgbouncer :6432 → :5432 (transaction pool)")
   Workers:  $WORKERS x $WORKER_CLASS$([ "$WORKER_CLASS" = "gevent" ] && echo " (conns/worker: $WORKER_CONNECTIONS)")
   Throttle: LOAD_TEST_MODE=$LOAD_TEST_MODE (rates bumped ~100x)
   URL:      http://127.0.0.1:$PORT

@@ -211,7 +211,7 @@ DATABASES = {
         "USER": "postgres",
         "PASSWORD": os.getenv("DB_PASSWORD"),
         "HOST": "localhost",
-        "PORT": "5432",
+        "PORT": os.getenv("DB_PORT", "5432"),
         "DISABLE_SERVER_SIDE_CURSORS": USE_PGBOUNCER,
     }
 }
