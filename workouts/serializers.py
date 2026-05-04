@@ -12,7 +12,7 @@ class ExerciseSerializer(serializers.ModelSerializer):
     muscles = MuscleGroupSerializer(many=True,read_only=True)
     class Meta:
         model = Exercise
-        fields = ("id", "uuid", "name", "slug", "description", "exercise_type", "movement_type", "difficulty", "muscles", "instructions", "video_url", "equipment_needed", "created_at", "updated_at")
+        fields = ("id", "uuid", "name", "slug", "description", "exercise_type", "movement_type", "difficulty", "muscles", "instructions", "video_url", "equipment_needed", "cardio_intensity", "created_at", "updated_at")
 
 class WorkoutSetSerializer(serializers.ModelSerializer):
     class Meta:

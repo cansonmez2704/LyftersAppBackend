@@ -19,14 +19,14 @@ class MuscleGroupAdmin(admin.ModelAdmin):
 
 @admin.register(Exercise)
 class ExerciseAdmin(admin.ModelAdmin):
-    list_display   = ("name", "exercise_type", "movement_type", "difficulty", "created_at")
-    list_filter    = ("exercise_type", "movement_type", "difficulty")
+    list_display   = ("name", "exercise_type", "movement_type", "difficulty", "cardio_intensity", "created_at")
+    list_filter    = ("exercise_type", "movement_type", "difficulty", "cardio_intensity")
     search_fields  = ("name", "description")
     filter_horizontal = ("muscles",)
     readonly_fields = ("created_at", "updated_at")
     fieldsets = (
         ("Basic Info", {"fields": ("name", "description", "instructions", "video_url", "equipment_needed")}),
-        ("Classification", {"fields": ("exercise_type", "movement_type", "difficulty")}),
+        ("Classification", {"fields": ("exercise_type", "movement_type", "difficulty", "cardio_intensity")}),
         ("Muscles", {"fields": ("muscles",)}),
         ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
     )

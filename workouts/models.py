@@ -38,6 +38,11 @@ class Exercise(models.Model):
         BEGINNER = "beginner", "Beginner"
         INTERMEDIATE = "intermediate", "Intermediate"
         ADVANCED = "advanced", "Advanced"
+    class CardioIntensity(models.TextChoices):
+        LISS = "liss", "LISS"
+        MISS = "miss", "MISS"
+        HIIT = "hiit", "HIIT"
+        SIT = "sit", "SIT"
     name = models.CharField(max_length=200, unique=True)
     slug = models.SlugField(max_length=200, unique=True)
     description = models.TextField(blank=True, default="")
@@ -80,6 +85,13 @@ class Exercise(models.Model):
         blank=True,
         default=list,
         help_text="List of required equipment, e.g., ['barbell', 'bench']"
+    )
+    cardio_intensity = models.CharField(
+        max_length=10,
+        choices=CardioIntensity.choices,
+        blank=True,
+        default="",
+        help_text="Intensity bucket for cardio exercises (LISS / MISS / HIIT / SIT). Leave blank for non-cardio.",
     )
     
     uuid = models.UUIDField(
