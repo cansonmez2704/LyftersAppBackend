@@ -44,6 +44,8 @@ class GoogleLoginView(SocialLoginView):
     """
     adapter_class = GoogleOAuth2Adapter
     client_class = OAuth2Client
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'strict_auth'
 
     @property
     def callback_url(self):
@@ -58,6 +60,7 @@ class GoogleClientIdView(APIView):
     """Returns the Google OAuth client_id so the SPA can build the consent URL
     without hardcoding secrets in the frontend bundle."""
     permission_classes = [AllowAny]
+    throttle_classes = []
 
     def get(self, request):
         from allauth.socialaccount.models import SocialApp
