@@ -5,6 +5,7 @@ Celery tasks for the community app.
 - Purge soft-deleted posts (30+ days old)
 - Purge soft-deleted comments (30+ days old)
 """
+
 import logging
 from io import BytesIO
 from datetime import timedelta
@@ -53,12 +54,12 @@ def dispatch_moderation(content_type_id: int, object_id: int) -> None:
     )
 
 
-# Groq SDK exception classes are loaded lazily in the task body so that
-# importing tasks.py does not require the groq package at module-import
+# OpenAI SDK exception classes are loaded lazily in the task body so that
+# importing tasks.py does not require the openai package at module-import
 # time (e.g. during makemigrations or when running unrelated tests).
-def _groq_retry_exceptions():
+def _moderation_retry_exceptions():
     try:
-        from groq import APIConnectionError, APIError, APITimeoutError, RateLimitError
+        from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
 
         return (APIConnectionError, APIError, APITimeoutError, RateLimitError, TimeoutError)
     except ImportError:
@@ -117,13 +118,13 @@ def process_post_media(self, post_media_id):
     max_retries=3,
 )
 def moderate_content(self, content_type_id: int, object_id: int, dispatch_ts=None):
-    """Screen a Moderatable instance against Groq's Llama Guard model.
+    """Screen a Moderatable instance against the OpenAI moderation endpoint.
 
     Outcomes:
       * Allowed → status=PUBLISHED.
       * Flagged → status=REJECTED. We log raw category_scores so we can
         re-tune thresholds later from historical data.
-      * Groq errors → exponential-backoff retries (handled by Celery via
+      * API errors → exponential-backoff retries (handled by Celery via
         autoretry_for). On final failure we fall open: status=PUBLISHED
         but requires_manual_review=True so an admin sees it. Set
         ``MODERATION_FAIL_OPEN=False`` to fail-closed instead.
@@ -142,7 +143,7 @@ def moderate_content(self, content_type_id: int, object_id: int, dispatch_ts=Non
         except Exception:
             pass  # Cache unavailable — run moderation anyway.
     from common.moderation import ModerationDecision, ModerationResult, ModerationStatus
-    from common import groq_client
+    from common import openai_client
 
     try:
         ct = ContentType.objects.get_for_id(content_type_id)
@@ -163,8 +164,8 @@ def moderate_content(self, content_type_id: int, object_id: int, dispatch_ts=Non
         return "empty_text"
 
     try:
-        response = groq_client.moderate_text(text)
-    except _groq_retry_exceptions() as exc:
+        response = openai_client.moderate_text(text)
+    except _moderation_retry_exceptions() as exc:
         # Let Celery's autoretry_for handle the retry with backoff. When
         # max_retries is hit, this re-raises and lands in on_failure-style
         # handling below (we use the task's `request.retries` to detect

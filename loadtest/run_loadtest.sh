@@ -165,7 +165,8 @@ PY
 fi
 
 echo "Starting celery worker (logs: loadtest/logs/celery.log)..."
-celery -A core worker -l warning -Q default,media,maintenance,moderation --concurrency=2 \
+CELERY_CONCURRENCY="${CELERY_CONCURRENCY:-2}"
+celery -A core worker -l warning -Q default,media,maintenance,moderation --concurrency="$CELERY_CONCURRENCY" \
     >loadtest/logs/celery.log 2>&1 &
 PIDS+=($!)
 
@@ -175,6 +176,7 @@ GUNICORN_ARGS=(
     --worker-class "$WORKER_CLASS"
     --bind "0.0.0.0:$PORT"
     --access-logfile loadtest/logs/gunicorn-access.log
+    --access-logformat '%(t)s %(s)s %(L)s "%(r)s"'
     --error-logfile loadtest/logs/gunicorn.log
     --log-level warning
 )

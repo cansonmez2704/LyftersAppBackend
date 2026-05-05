@@ -47,8 +47,8 @@ django-celery-beat>=2.6.0
 django-storages>=1.14.0
 boto3>=1.34.0
 
-# Content moderation (Groq Llama Guard via chat/completions)
-groq>=0.11.0
+# Content moderation (OpenAI omni-moderation-latest)
+openai>=1.40.0
 
 # Load testing (loadtest/locustfile.py)
 locust>=2.20.0

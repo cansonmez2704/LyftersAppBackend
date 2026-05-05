@@ -12,12 +12,12 @@ logger = logging.getLogger(__name__)
 
 
 def _moderate_or_raise(text: str, *, kind: str):
-    """Synchronously screen ``text`` against Groq before persisting.
+    """Synchronously screen ``text`` against the moderation API before persisting.
 
     Returns:
       * ``True``  — content passed the check (sync path completed cleanly).
         Caller should publish immediately and skip the async dispatch.
-      * ``False`` — sync mode disabled, or Groq was unreachable. Caller
+      * ``False`` — sync mode disabled, or the API was unreachable. Caller
         should fall back to the async Celery path so a third-party outage
         doesn't block users.
 
@@ -36,10 +36,10 @@ def _moderate_or_raise(text: str, *, kind: str):
     if not getattr(dj_settings, "MODERATION_SYNC_ENABLED", True):
         return False
 
-    from common import groq_client
+    from common import openai_client
 
     try:
-        response = groq_client.moderate_text(text)
+        response = openai_client.moderate_text(text)
     except Exception as exc:
         logger.warning(
             "Sync moderation unavailable for %s; deferring to async backup: %r",
@@ -332,7 +332,7 @@ class PostWriteSerializer(serializers.ModelSerializer):
                     )
 
             if not sync_ok:
-                # Sync moderation didn't run (Groq down) — defer to async.
+                # Sync moderation didn't run (API unavailable) — defer to async.
                 post_ct_id = ContentType.objects.get_for_model(Post).id
                 transaction.on_commit(
                     lambda pid=post.pk: dispatch_moderation(post_ct_id, pid)
@@ -354,8 +354,8 @@ class PostWriteSerializer(serializers.ModelSerializer):
                     instance.moderation_status = ModerationStatus.PUBLISHED
                     instance.moderated_at = timezone.now()
                 else:
-                    # Groq unavailable: fall back to the async path. Hide
-                    # from non-authors until the Celery task re-screens.
+                    # Moderation API unavailable: fall back to the async path.
+                    # Hide from non-authors until the Celery task re-screens.
                     instance.moderation_status = ModerationStatus.PENDING
                     instance.moderated_at = None
 

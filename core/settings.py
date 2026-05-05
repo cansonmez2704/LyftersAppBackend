@@ -326,38 +326,32 @@ CELERY_TASK_ROUTES = {
 }
 
 
-# --- Groq Moderation (Llama Guard) -----------------------------------------
+# --- OpenAI Moderation -----------------------------------------------------
 # Key only ever read server-side; never expose to clients or log it.
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODERATION_MODEL = os.getenv("GROQ_MODERATION_MODEL", "llama-3.1-8b-instant")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Hard ceiling on the sync moderation path. Without a timeout, a slow Groq
+# Hard ceiling on the sync moderation path. Without a timeout, a slow OpenAI
 # response holds a gunicorn worker + DB connection until the SDK's default
-# (~60s), which can drain the worker pool during a Groq incident. The fail-
-# open branch in `_moderate_or_raise` catches the timeout and defers to the
-# async Celery path, so a tight timeout here costs at most one extra task
-# enqueue per affected request.
-GROQ_MODERATION_TIMEOUT = float(os.getenv("GROQ_MODERATION_TIMEOUT", "5.0"))
+# (~60s), which can drain the worker pool during an outage. The fail-open
+# branch in `_moderate_or_raise` catches the timeout and defers to the async
+# Celery path, so a tight timeout here costs at most one extra task enqueue
+# per affected request.
+OPENAI_MODERATION_TIMEOUT = float(os.getenv("OPENAI_MODERATION_TIMEOUT", "5.0"))
 
-# Fail-open: after Celery exhausts retries (Groq down for an extended
-# window) we still publish the post and queue it for human review rather
-# than freezing user content. Flip to False to fail-closed if compliance
+# Fail-open: after Celery exhausts retries (API down for an extended window)
+# we still publish the post and queue it for human review rather than
+# freezing user content. Flip to False to fail-closed if compliance
 # requirements ever demand it.
 MODERATION_FAIL_OPEN = os.getenv("MODERATION_FAIL_OPEN", "True") == "True"
 
-# When True (default), POST /posts and /comments call the moderation provider
-# inline before responding — instant feedback, but a slow/rate-limited provider
-# stalls request workers and can cascade into 500s on unrelated endpoints.
-# When False, all moderation runs in the existing celery task; posts appear as
-# PENDING for a few seconds then flip to PUBLISHED. Recommended for production.
-MODERATION_SYNC_ENABLED = os.getenv("MODERATION_SYNC_ENABLED", "True") == "True"
-
-# "groq" (default) or "openai". When "openai", set OPENAI_API_KEY too.
-# OpenAI's moderation endpoint is free and has higher rate limits than Groq's
-# free tier, with comparable multilingual quality. The provider modules expose
-# the same moderate_text() interface so callers don't change.
-MODERATION_PROVIDER = os.getenv("MODERATION_PROVIDER", "groq").lower()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# When False (default), all moderation runs in the Celery task; posts appear
+# as PENDING for a few seconds then flip to PUBLISHED. Validated under load
+# (F3 @ 500u: 122.5 RPS, 0.24% failures) — keeps gunicorn workers off the
+# OpenAI critical path so a slow/rate-limited API can't cascade into 500s.
+# When True, POST /posts and /comments call the moderation API inline before
+# responding — instant feedback, but every request inherits OpenAI's latency
+# (~200-500ms) and a worker is held for that duration. Use only for dev/QA.
+MODERATION_SYNC_ENABLED = os.getenv("MODERATION_SYNC_ENABLED", "False") == "True"
 
 # --- YouTube Data API v3 ---------------------------------------------------
 # Used by the `backfill_video_urls` management command to populate

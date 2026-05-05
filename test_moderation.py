@@ -1,10 +1,10 @@
-"""End-to-end moderation test.
+"""End-to-end moderation probe.
 
 Run from GymHubBackend/:
     python manage.py shell < test_moderation.py
 
 Three layers, in order:
-  1. Direct OpenAI call -> does the API flag the Turkish profanity at all?
+  1. Direct OpenAI call -> does the API flag the sample text at all?
   2. Synchronous task run -> does our task code do the right thing on a flag?
   3. Asynchronous dispatch -> does the running Celery worker pick it up?
 """
@@ -12,7 +12,7 @@ import time
 from django.contrib.contenttypes.models import ContentType
 from community.models import Comment
 from common.moderation import ModerationResult, ModerationStatus
-from common import groq_client
+from common import openai_client
 from community.tasks import moderate_content, dispatch_moderation
 
 
@@ -24,17 +24,17 @@ SAMPLES = [
 ]
 
 print("=" * 72)
-print("LAYER 1: direct Groq Llama Guard call (bypasses Celery & DB)")
+print("LAYER 1: direct OpenAI omni-moderation call (bypasses Celery & DB)")
 print("=" * 72)
 for text in SAMPLES:
     try:
-        r = groq_client.moderate_text(text)
+        r = openai_client.moderate_text(text)
         hits = [k for k, v in r.categories.items() if v]
         print(f"  flagged={r.flagged!s:<5}  text={text!r}")
         print(f"     categories hit: {hits or '(none)'}")
     except Exception as e:
         print(f"  ERROR on {text!r}: {type(e).__name__}: {e}")
-        print("  -> GROQ_API_KEY missing or invalid? Check env.")
+        print("  -> OPENAI_API_KEY missing or invalid? Check env.")
         break
 
 print()
